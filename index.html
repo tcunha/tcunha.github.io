@@ -92,7 +92,7 @@ name. The regular MSF pattern-create (or its alternatives like &hellip;">
 
 <p>Started, as usual, by fetching the number of characters needed to overflow the
 name. The regular MSF pattern-create (or its alternatives like peda) approach
-can be used. In this case, consider, that 44 bytes are needed to overflow.</p>
+can be used. In this case consider that 44 bytes are needed to overflow.</p>
 
 <p>The system(3) function doesn&rsquo;t seem to be linked in the library. On purpose,
 most likely. One can use the mprotect(2) system call to bypass the NX protection
@@ -180,7 +180,7 @@ pages as executable and read a shellcode into that location from standard input.
 
 <h2>level1</h2>
 
-<p>This needs some code analysis at first to figure out where exactly the overflow
+<p>This first needs some code analysis to figure out where exactly the overflow
 occurs. The issue here is that the (specified) file&rsquo;s size (and therefore under
 control) is also being used when reading its (path) name from the socket:</p>
 
@@ -309,7 +309,7 @@ file:</p>
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>0xf0 bytes is more than enough to hold the 53 bytes of the flag file. Since the
+<p>0xf0 bytes is more than enough to hold the 53 bytes of the file. Since the
 binary also has the flag character array (NUL terminated), its address can be
 used, instead:</p>
 
