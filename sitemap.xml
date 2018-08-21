@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd" xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
+    <loc>http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter/</loc>
+    <lastmod>2018-08-21T00:50:25+00:00</lastmod>
+  </url>
+  <url>
     <loc>http://tcunha.github.io/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/</loc>
     <lastmod>2018-07-28T08:20:29+00:00</lastmod>
   </url>

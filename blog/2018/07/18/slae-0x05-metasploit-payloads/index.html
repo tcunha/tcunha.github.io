@@ -730,7 +730,7 @@ Student-ID: SLAE-1154
 
 <h3>2. linux/x86/shell_find_tag</h3>
 
-<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configure tag:</p>
+<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configured tag:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -1201,7 +1201,7 @@ Student-ID: SLAE-1154
 
 <h3>3. linux/x86/read_file</h3>
 
-<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having 0x00 characters in the resulting shellcode:</p>
+<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having \x00 characters in the resulting shellcode:</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -1377,6 +1377,10 @@ Student-ID: SLAE-1154
   <ul id="recent_posts">
     
       <li class="post">
+        <a href="/blog/2018/08/21/slae-0x07-crypter/">SLAE 0x07: Crypter</a>
+      </li>
+    
+      <li class="post">
         <a href="/blog/2018/07/28/slae-0x06-polymorphic-shellcodes/">SLAE 0x06: Polymorphic Shellcodes</a>
       </li>
     
@@ -1390,10 +1394,6 @@ Student-ID: SLAE-1154
     
       <li class="post">
         <a href="/blog/2018/06/19/slae-0x03-egghunter/">SLAE 0x03: Egghunter</a>
-      </li>
-    
-      <li class="post">
-        <a href="/blog/2018/05/21/slae-0x02-reverse-tcp-shell/">SLAE 0x02: Reverse TCP Shell</a>
       </li>
     
   </ul>

